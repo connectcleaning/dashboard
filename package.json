@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "sync": "tsx src/cli.ts",
-    "migrate": "tsx src/lib/migrate.ts"
+    "sync": "tsx --env-file=.env src/cli.ts",
+    "migrate": "tsx --env-file=.env src/lib/migrate.ts"
   },
   "dependencies": {
     "postgres": "^3.4.4"
