@@ -2,19 +2,27 @@ import { query } from './lib/db';
 import { RevenueChart } from './components/RevenueChart';
 
 interface MrrRow { month: string; recurring_jobs: number; recurring_revenue: number }
+interface MonthlyRow { month: string; jobs: number; total_revenue: number }
 interface SummaryRow { total_revenue: number; avg_job_size: number; total_jobs: number }
 interface OppsRow { status: string; count: number }
 
 export const dynamic = 'force-dynamic';
 
 export default async function Dashboard() {
-  const [mrr, summary, opps] = await Promise.all([
+  const [mrr, monthly, summary, opps] = await Promise.all([
     query<MrrRow>(`select month::text, recurring_jobs, recurring_revenue::float from marts.mrr where month >= now() - interval '12 months' order by month`),
+    query<MonthlyRow>(`select date_trunc('month', job_date)::text as month, count(*) as jobs, sum(revenue)::float as total_revenue from marts.fact_job where job_date >= now() - interval '12 months' group by 1 order by 1`),
     query<SummaryRow>(`select sum(revenue)::float as total_revenue, avg(revenue)::float as avg_job_size, count(*) as total_jobs from marts.fact_job where job_date >= now() - interval '12 months'`),
     query<OppsRow>(`select status, count(*) from raw.ghl_opportunities group by status order by count desc`),
   ]);
 
   const s = summary[0];
+  const currentMonth = monthly[monthly.length - 1];
+  const prevMonth = monthly[monthly.length - 2];
+  const revenueChange = currentMonth && prevMonth
+    ? ((currentMonth.total_revenue - prevMonth.total_revenue) / prevMonth.total_revenue * 100).toFixed(1)
+    : null;
+
   const currentMrr = mrr[mrr.length - 1];
   const prevMrr = mrr[mrr.length - 2];
   const mrrChange = currentMrr && prevMrr
@@ -32,16 +40,23 @@ export default async function Dashboard() {
 
       {/* KPI cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 40 }}>
+        <Card label="This Month Revenue" value={`$${currentMonth ? fmt(currentMonth.total_revenue) : '—'}`} sub={revenueChange ? `${revenueChange}% vs last month` : ''} />
         <Card label="MRR" value={`$${currentMrr ? fmt(currentMrr.recurring_revenue) : '—'}`} sub={mrrChange ? `${mrrChange}% vs last month` : ''} />
-        <Card label="Total Revenue (12mo)" value={`$${fmt(s?.total_revenue ?? 0)}`} />
         <Card label="Avg Job Size" value={`$${(s?.avg_job_size ?? 0).toFixed(0)}`} />
         <Card label="Close Rate" value={`${closeRate}%`} sub={`${wonOpps} won of ${totalOpps}`} />
       </div>
 
-      {/* Revenue chart */}
+      {/* Total monthly revenue chart */}
+      <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: 24 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Total Monthly Revenue</h2>
+        <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 20 }}>12-month total: <strong>${fmt(s?.total_revenue ?? 0)}</strong></p>
+        <RevenueChart data={monthly.map(r => ({ month: r.month.slice(0, 7), revenue: r.total_revenue }))} color="#10b981" />
+      </div>
+
+      {/* MRR chart */}
       <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: 24 }}>
         <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 20 }}>Monthly Recurring Revenue</h2>
-        <RevenueChart data={mrr.map(r => ({ month: r.month.slice(0, 7), revenue: r.recurring_revenue }))} />
+        <RevenueChart data={mrr.map(r => ({ month: r.month.slice(0, 7), revenue: r.recurring_revenue }))} color="#6366f1" />
       </div>
 
       {/* Pipeline */}
