@@ -1,6 +1,6 @@
-import { sql } from '../lib/db.js';
+import { upsert } from '../lib/db.js';
 import { logger } from '../lib/logger.js';
-import { ghlPages } from '../clients/ghl.js';
+import { ghlPages, ghlGet } from '../clients/ghl.js';
 
 interface GhlConversation {
   id: string;
@@ -24,25 +24,23 @@ export async function syncGhlMessages(since?: Date): Promise<number> {
 
   let count = 0;
   for await (const page of ghlPages<GhlConversation>('/conversations/search', params)) {
+    const rows: Record<string, unknown>[] = [];
     for (const conv of page) {
-      // fetch messages for each conversation
-      const msgData = await import('../clients/ghl.js').then(m =>
-        m.ghlGet<{ messages?: GhlMessage[] }>(`/conversations/${conv.id}/messages`),
-      );
+      const msgData = await ghlGet<{ messages?: GhlMessage[] }>(`/conversations/${conv.id}/messages`);
       for (const msg of msgData.messages ?? []) {
-        await sql`
-          insert into raw.ghl_messages (
-            message_id, ghl_contact_id, conversation_id, channel, direction, created_at, raw_json
-          ) values (
-            ${msg.id}, ${conv.contactId ?? null}, ${conv.id},
-            ${msg.type ?? null}, ${msg.direction ?? null},
-            ${msg.dateAdded ?? null}, ${sql.json(msg as never)}
-          )
-          on conflict (message_id) do nothing
-        `;
-        count++;
+        rows.push({
+          message_id: msg.id,
+          ghl_contact_id: conv.contactId ?? null,
+          conversation_id: conv.id,
+          channel: msg.type ?? null,
+          direction: msg.direction ?? null,
+          created_at: msg.dateAdded ?? null,
+          raw_json: msg,
+        });
       }
     }
+    if (rows.length) await upsert('raw', 'ghl_messages', rows, 'message_id');
+    count += rows.length;
   }
   logger.info('ghl_messages synced', { count });
   return count;

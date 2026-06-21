@@ -1,4 +1,4 @@
-import { sql } from '../lib/db.js';
+import { upsert } from '../lib/db.js';
 import { logger } from '../lib/logger.js';
 import { hcpPages } from '../clients/hcp.js';
 
@@ -12,23 +12,21 @@ interface HcpEmployee {
 }
 
 export async function syncHcpEmployees(): Promise<number> {
-  let count = 0;
+  const rows: Record<string, unknown>[] = [];
   for await (const page of hcpPages<HcpEmployee>('/employees')) {
     for (const e of page) {
-      await sql`
-        insert into raw.hcp_employees (hcp_employee_id, name, role, is_active, email, raw_json, synced_at)
-        values (${e.id}, ${e.name}, ${e.role}, ${e.is_active}, ${e.email ?? null}, ${sql.json(e as never)}, now())
-        on conflict (hcp_employee_id) do update set
-          name      = excluded.name,
-          role      = excluded.role,
-          is_active = excluded.is_active,
-          email     = excluded.email,
-          raw_json  = excluded.raw_json,
-          synced_at = now()
-      `;
-      count++;
+      rows.push({
+        hcp_employee_id: e.id,
+        name: e.name ?? null,
+        role: e.role ?? null,
+        is_active: e.is_active ?? null,
+        email: e.email ?? null,
+        raw_json: e,
+        synced_at: new Date().toISOString(),
+      });
     }
   }
-  logger.info('hcp_employees synced', { count });
-  return count;
+  await upsert('raw', 'hcp_employees', rows, 'hcp_employee_id');
+  logger.info('hcp_employees synced', { count: rows.length });
+  return rows.length;
 }

@@ -1,6 +1,5 @@
 import 'node:process';
 import { orchestrate } from './sync/orchestrator.js';
-import { sql } from './lib/db.js';
 import { resolveIdentities } from './match/resolve.js';
 import { logger } from './lib/logger.js';
 
@@ -25,6 +24,4 @@ try {
 } catch (err) {
   logger.error('cli error', { error: err instanceof Error ? err.message : String(err) });
   process.exit(1);
-} finally {
-  await sql.end();
 }

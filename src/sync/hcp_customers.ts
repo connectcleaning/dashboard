@@ -1,4 +1,4 @@
-import { sql } from '../lib/db.js';
+import { upsert } from '../lib/db.js';
 import { logger } from '../lib/logger.js';
 import { hcpPages } from '../clients/hcp.js';
 
@@ -21,38 +21,28 @@ export async function syncHcpCustomers(since?: Date): Promise<number> {
   const params: Record<string, string> = {};
   if (since) params['updated_at[gte]'] = since.toISOString();
 
-  let count = 0;
+  const rows: Record<string, unknown>[] = [];
   for await (const page of hcpPages<HcpCustomer>('/customers', params)) {
     for (const c of page) {
-      await sql`
-        insert into raw.hcp_customers (
-          hcp_customer_id, first_name, last_name, company, email,
-          mobile_phone, home_phone, address_city, address_zip,
-          tags, created_at, updated_at, raw_json, synced_at
-        ) values (
-          ${c.id}, ${c.first_name ?? null}, ${c.last_name ?? null}, ${c.company ?? null},
-          ${c.email ?? null}, ${c.mobile_number ?? null}, ${c.home_number ?? null},
-          ${c.address?.city ?? null}, ${c.address?.zip ?? null},
-          ${c.tags ?? []}, ${c.created_at ?? null}, ${c.updated_at ?? null},
-          ${sql.json(c as never)}, now()
-        )
-        on conflict (hcp_customer_id) do update set
-          first_name   = excluded.first_name,
-          last_name    = excluded.last_name,
-          company      = excluded.company,
-          email        = excluded.email,
-          mobile_phone = excluded.mobile_phone,
-          home_phone   = excluded.home_phone,
-          address_city = excluded.address_city,
-          address_zip  = excluded.address_zip,
-          tags         = excluded.tags,
-          updated_at   = excluded.updated_at,
-          raw_json     = excluded.raw_json,
-          synced_at    = now()
-      `;
-      count++;
+      rows.push({
+        hcp_customer_id: c.id,
+        first_name: c.first_name ?? null,
+        last_name: c.last_name ?? null,
+        company: c.company ?? null,
+        email: c.email ?? null,
+        mobile_phone: c.mobile_number ?? null,
+        home_phone: c.home_number ?? null,
+        address_city: c.address?.city ?? null,
+        address_zip: c.address?.zip ?? null,
+        tags: c.tags ?? [],
+        created_at: c.created_at ?? null,
+        updated_at: c.updated_at ?? null,
+        raw_json: c,
+        synced_at: new Date().toISOString(),
+      });
     }
   }
-  logger.info('hcp_customers synced', { count });
-  return count;
+  await upsert('raw', 'hcp_customers', rows, 'hcp_customer_id');
+  logger.info('hcp_customers synced', { count: rows.length });
+  return rows.length;
 }

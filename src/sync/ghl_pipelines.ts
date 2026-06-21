@@ -1,4 +1,4 @@
-import { sql } from '../lib/db.js';
+import { upsert } from '../lib/db.js';
 import { logger } from '../lib/logger.js';
 import { ghlGet } from '../clients/ghl.js';
 
@@ -18,22 +18,18 @@ interface Pipeline {
 
 export async function syncGhlPipelines(): Promise<number> {
   const data = await ghlGet<{ pipelines: Pipeline[] }>('/opportunities/pipelines');
-  let count = 0;
+  const pipelineRows: Record<string, unknown>[] = [];
+  const stageRows: Record<string, unknown>[] = [];
+
   for (const p of data.pipelines ?? []) {
-    await sql`
-      insert into raw.ghl_pipelines (pipeline_id, name, raw_json)
-      values (${p.id}, ${p.name}, ${sql.json(p as never)})
-      on conflict (pipeline_id) do update set name = excluded.name, raw_json = excluded.raw_json
-    `;
+    pipelineRows.push({ pipeline_id: p.id, name: p.name, raw_json: p });
     for (const s of p.stages ?? []) {
-      await sql`
-        insert into raw.ghl_stages (stage_id, pipeline_id, name, position, raw_json)
-        values (${s.id}, ${p.id}, ${s.name}, ${s.position}, ${sql.json(s as never)})
-        on conflict (stage_id) do update set name = excluded.name, position = excluded.position, raw_json = excluded.raw_json
-      `;
+      stageRows.push({ stage_id: s.id, pipeline_id: p.id, name: s.name, position: s.position, raw_json: s });
     }
-    count++;
   }
-  logger.info('ghl_pipelines synced', { count });
-  return count;
+
+  await upsert('raw', 'ghl_pipelines', pipelineRows, 'pipeline_id');
+  if (stageRows.length) await upsert('raw', 'ghl_stages', stageRows, 'stage_id');
+  logger.info('ghl_pipelines synced', { count: pipelineRows.length });
+  return pipelineRows.length;
 }
