@@ -15,12 +15,14 @@ export async function* ghlPages<T>(
   pageSize = 100,
 ): AsyncGenerator<T[]> {
   let startAfter: string | undefined;
+  let startAfterId: string | undefined;
   while (true) {
     const qs = new URLSearchParams({
       locationId: env.GHL_LOCATION_ID,
       limit: String(pageSize),
       ...params,
       ...(startAfter ? { startAfter } : {}),
+      ...(startAfterId ? { startAfterId } : {}),
     });
     const res = await fetchWithRetry(`${BASE}${path}?${qs}`, { headers });
     const data = await res.json() as { [k: string]: unknown };
@@ -30,9 +32,10 @@ export async function* ghlPages<T>(
     if (rows.length === 0) break;
     yield rows;
 
-    const meta = data['meta'] as { startAfter?: string; nextPageUrl?: string } | undefined;
+    const meta = data['meta'] as { startAfter?: string | number; startAfterId?: string; nextPageUrl?: string } | undefined;
     if (!meta?.startAfter) break;
-    startAfter = meta.startAfter;
+    startAfter = String(meta.startAfter);
+    startAfterId = meta.startAfterId;
   }
 }
 
