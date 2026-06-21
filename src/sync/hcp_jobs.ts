@@ -40,56 +40,71 @@ export async function syncHcpJobs(since?: Date): Promise<number> {
   const params: Record<string, string> = {};
   if (since) params['updated_at[gte]'] = since.toISOString();
 
-  const jobRows: Record<string, unknown>[] = [];
-  const assignmentRows: Record<string, unknown>[] = [];
-  const lineItemRows: Record<string, unknown>[] = [];
-
+  let total = 0;
   for await (const page of hcpPages<HcpJob>('/jobs', params)) {
+    const seenJobs = new Set<string>();
+    const seenAssignments = new Set<string>();
+    const seenLineItems = new Set<string>();
+    const jobRows: Record<string, unknown>[] = [];
+    const assignmentRows: Record<string, unknown>[] = [];
+    const lineItemRows: Record<string, unknown>[] = [];
+
     for (const j of page) {
-      jobRows.push({
-        hcp_job_id: j.id,
-        hcp_customer_id: j.customer?.id ?? null,
-        work_status: j.work_status,
-        total_amount: j.total_amount ?? null,
-        outstanding_balance: j.outstanding_balance ?? null,
-        scheduled_start: j.schedule?.scheduled_start ?? null,
-        completed_at: j.completed_at ?? null,
-        hcp_invoice_id: j.invoice?.id ?? null,
-        job_type: j.job_type ?? null,
-        tags: j.tags ?? [],
-        address_city: j.address?.city ?? null,
-        address_zip: j.address?.zip ?? null,
-        created_at: j.created_at ?? null,
-        updated_at: j.updated_at ?? null,
-        raw_json: j,
-        synced_at: new Date().toISOString(),
-      });
+      if (!seenJobs.has(j.id)) {
+        seenJobs.add(j.id);
+        jobRows.push({
+          hcp_job_id: j.id,
+          hcp_customer_id: j.customer?.id ?? null,
+          work_status: j.work_status,
+          total_amount: j.total_amount ?? null,
+          outstanding_balance: j.outstanding_balance ?? null,
+          scheduled_start: j.schedule?.scheduled_start ?? null,
+          completed_at: j.completed_at ?? null,
+          hcp_invoice_id: j.invoice?.id ?? null,
+          job_type: j.job_type ?? null,
+          tags: j.tags ?? [],
+          address_city: j.address?.city ?? null,
+          address_zip: j.address?.zip ?? null,
+          created_at: j.created_at ?? null,
+          updated_at: j.updated_at ?? null,
+          raw_json: j,
+          synced_at: new Date().toISOString(),
+        });
+      }
 
       for (const a of j.assigned_employees ?? []) {
         if (a.employee?.id) {
-          assignmentRows.push({ hcp_job_id: j.id, hcp_employee_id: a.employee.id });
+          const key = `${j.id}:${a.employee.id}`;
+          if (!seenAssignments.has(key)) {
+            seenAssignments.add(key);
+            assignmentRows.push({ hcp_job_id: j.id, hcp_employee_id: a.employee.id });
+          }
         }
       }
 
       for (const li of j.line_items ?? []) {
-        lineItemRows.push({
-          id: li.id,
-          hcp_job_id: j.id,
-          kind: li.kind ?? null,
-          name: li.name ?? null,
-          quantity: li.quantity ?? null,
-          unit_price: li.unit_price ?? null,
-          amount: li.total_amount ?? null,
-          raw_json: li,
-        });
+        if (!seenLineItems.has(li.id)) {
+          seenLineItems.add(li.id);
+          lineItemRows.push({
+            id: li.id,
+            hcp_job_id: j.id,
+            kind: li.kind ?? null,
+            name: li.name ?? null,
+            quantity: li.quantity ?? null,
+            unit_price: li.unit_price ?? null,
+            amount: li.total_amount ?? null,
+            raw_json: li,
+          });
+        }
       }
     }
+
+    if (jobRows.length) await upsert('raw', 'hcp_jobs', jobRows, 'hcp_job_id');
+    if (assignmentRows.length) await upsert('raw', 'hcp_job_assignments', assignmentRows, 'hcp_job_id,hcp_employee_id');
+    if (lineItemRows.length) await upsert('raw', 'hcp_line_items', lineItemRows, 'id');
+    total += jobRows.length;
   }
 
-  await upsert('raw', 'hcp_jobs', jobRows, 'hcp_job_id');
-  if (assignmentRows.length) await upsert('raw', 'hcp_job_assignments', assignmentRows, 'hcp_job_id,hcp_employee_id');
-  if (lineItemRows.length) await upsert('raw', 'hcp_line_items', lineItemRows, 'id');
-
-  logger.info('hcp_jobs synced', { count: jobRows.length });
-  return jobRows.length;
+  logger.info('hcp_jobs synced', { count: total });
+  return total;
 }

@@ -18,9 +18,13 @@ export async function syncHcpInvoices(since?: Date): Promise<number> {
   const params: Record<string, string> = {};
   if (since) params['updated_at[gte]'] = since.toISOString();
 
-  const rows: Record<string, unknown>[] = [];
+  let total = 0;
   for await (const page of hcpPages<HcpInvoice>('/invoices', params)) {
+    const seen = new Set<string>();
+    const rows: Record<string, unknown>[] = [];
     for (const inv of page) {
+      if (seen.has(inv.id)) continue;
+      seen.add(inv.id);
       rows.push({
         hcp_invoice_id: inv.id,
         hcp_job_id: inv.job?.id ?? null,
@@ -34,8 +38,9 @@ export async function syncHcpInvoices(since?: Date): Promise<number> {
         synced_at: new Date().toISOString(),
       });
     }
+    if (rows.length) await upsert('raw', 'hcp_invoices', rows, 'hcp_invoice_id');
+    total += rows.length;
   }
-  await upsert('raw', 'hcp_invoices', rows, 'hcp_invoice_id');
-  logger.info('hcp_invoices synced', { count: rows.length });
-  return rows.length;
+  logger.info('hcp_invoices synced', { count: total });
+  return total;
 }

@@ -21,9 +21,13 @@ export async function syncHcpCustomers(since?: Date): Promise<number> {
   const params: Record<string, string> = {};
   if (since) params['updated_at[gte]'] = since.toISOString();
 
-  const rows: Record<string, unknown>[] = [];
+  let total = 0;
   for await (const page of hcpPages<HcpCustomer>('/customers', params)) {
+    const seen = new Set<string>();
+    const rows: Record<string, unknown>[] = [];
     for (const c of page) {
+      if (seen.has(c.id)) continue;
+      seen.add(c.id);
       rows.push({
         hcp_customer_id: c.id,
         first_name: c.first_name ?? null,
@@ -41,8 +45,9 @@ export async function syncHcpCustomers(since?: Date): Promise<number> {
         synced_at: new Date().toISOString(),
       });
     }
+    if (rows.length) await upsert('raw', 'hcp_customers', rows, 'hcp_customer_id');
+    total += rows.length;
   }
-  await upsert('raw', 'hcp_customers', rows, 'hcp_customer_id');
-  logger.info('hcp_customers synced', { count: rows.length });
-  return rows.length;
+  logger.info('hcp_customers synced', { count: total });
+  return total;
 }
