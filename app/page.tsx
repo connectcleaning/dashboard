@@ -5,15 +5,17 @@ interface MrrRow { month: string; recurring_jobs: number; recurring_revenue: num
 interface MonthlyRow { month: string; jobs: number; total_revenue: number }
 interface SummaryRow { total_revenue: number; avg_job_size: number; total_jobs: number }
 interface OppsRow { status: string; count: number }
+interface SourceRow { source: string; total: number; won: number; close_rate: number }
 
 export const dynamic = 'force-dynamic';
 
 export default async function Dashboard() {
-  const [mrr, monthly, summary, opps] = await Promise.all([
+  const [mrr, monthly, summary, opps, sources] = await Promise.all([
     query<MrrRow>(`select month::text, recurring_jobs, recurring_revenue::float from marts.mrr where month >= now() - interval '12 months' order by month`),
     query<MonthlyRow>(`select date_trunc('month', job_date)::text as month, count(*) as jobs, sum(revenue)::float as total_revenue from marts.fact_job where job_date >= now() - interval '12 months' group by 1 order by 1`),
     query<SummaryRow>(`select sum(revenue)::float as total_revenue, avg(revenue)::float as avg_job_size, count(*) as total_jobs from marts.fact_job where job_date >= now() - interval '12 months'`),
     query<OppsRow>(`select status, count(*) from raw.ghl_opportunities group by status order by count desc`),
+    query<SourceRow>(`select coalesce(nullif(trim(source),''), 'Unknown') as source, count(*) as total, sum(case when status='won' then 1 else 0 end) as won, round(100.0 * sum(case when status='won' then 1 else 0 end) / count(*), 1) as close_rate from raw.ghl_opportunities group by 1 having count(*) >= 5 order by close_rate desc`),
   ]);
 
   const s = summary[0];
@@ -59,25 +61,51 @@ export default async function Dashboard() {
         <RevenueChart data={mrr.map(r => ({ month: r.month.slice(0, 7), revenue: r.recurring_revenue }))} color="#6366f1" />
       </div>
 
-      {/* Pipeline */}
-      <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
-        <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>Pipeline by Status</h2>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
-              <th style={{ textAlign: 'left', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Status</th>
-              <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Count</th>
-            </tr>
-          </thead>
-          <tbody>
-            {opps.map(o => (
-              <tr key={o.status} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                <td style={{ padding: '10px 0', textTransform: 'capitalize' }}>{o.status}</td>
-                <td style={{ padding: '10px 0', textAlign: 'right', fontWeight: 600 }}>{o.count}</td>
+      {/* Pipeline + Close by source side by side */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+          <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>Pipeline by Status</h2>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+                <th style={{ textAlign: 'left', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Status</th>
+                <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Count</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {opps.map(o => (
+                <tr key={o.status} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                  <td style={{ padding: '10px 0', textTransform: 'capitalize' }}>{o.status}</td>
+                  <td style={{ padding: '10px 0', textAlign: 'right', fontWeight: 600 }}>{o.count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+          <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>Close Rate by Lead Source</h2>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+                <th style={{ textAlign: 'left', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Source</th>
+                <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Leads</th>
+                <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Won</th>
+                <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Close %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sources.map(s => (
+                <tr key={s.source} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                  <td style={{ padding: '10px 0' }}>{s.source}</td>
+                  <td style={{ padding: '10px 0', textAlign: 'right' }}>{s.total}</td>
+                  <td style={{ padding: '10px 0', textAlign: 'right' }}>{s.won}</td>
+                  <td style={{ padding: '10px 0', textAlign: 'right', fontWeight: 600, color: Number(s.close_rate) >= 20 ? '#10b981' : '#111' }}>{s.close_rate}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
