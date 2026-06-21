@@ -16,14 +16,14 @@ create or replace view marts._ghl_to_customer as
 -- cleaner_ids are aggregated into an array to avoid revenue double-counting.
 create or replace view marts.fact_job as
 select
-  j.hcp_job_id                                    as job_id,
+  j.hcp_job_id                                                          as job_id,
   c.customer_id,
-  array_agg(distinct a.hcp_employee_id)           as cleaner_ids,
-  coalesce(m.service_bucket, j.job_type)          as service_bucket,
-  coalesce(m.is_recurring, false)                 as recurring_flag,
-  j.address_city                                  as city,
-  j.completed_at::date                            as job_date,
-  j.total_amount                                  as revenue,
+  array_agg(distinct a.hcp_employee_id)                                 as cleaner_ids,
+  coalesce(m.service_bucket, j.job_type)                                as service_bucket,
+  coalesce(m.is_recurring, false)                                       as recurring_flag,
+  j.address_city                                                        as city,
+  (j.raw_json->'work_timestamps'->>'completed_at')::timestamptz::date  as job_date,
+  round(j.total_amount / 100.0, 2)                                      as revenue,
   cost.gross_profit,
   cost.sub_pay
 from raw.hcp_jobs j
@@ -34,7 +34,7 @@ left join core.service_bucket_map m  on m.match_value = j.job_type
 left join core.job_costs cost        on cost.hcp_job_id = j.hcp_job_id
 where j.work_status in ('complete rated', 'complete unrated')
 group by j.hcp_job_id, c.customer_id, m.service_bucket, m.is_recurring,
-         j.address_city, j.completed_at, j.total_amount,
+         j.address_city, j.raw_json, j.total_amount,
          cost.gross_profit, cost.sub_pay;
 
 create or replace view marts.fact_opportunity as
