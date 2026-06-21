@@ -39,7 +39,7 @@ jobs:
 
       - name: Run full sync (nightly)
         if: github.event.schedule == '0 7 * * *' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'full')
-        run: npx tsx src/cli.ts full
+        run: npx tsx src/cli.ts full && npx tsx src/cli.ts match
         env:
           DATABASE_URL:              ${{ secrets.DATABASE_URL }}
           SUPABASE_URL:              ${{ secrets.SUPABASE_URL }}

@@ -51,8 +51,6 @@ export async function orchestrate(mode: Mode): Promise<void> {
   await run('ghl_opportunities', () => syncGhlOpportunities(since));
   // ghl_messages (conversations) skipped — not needed for current metrics
 
-  await run('match', async () => { await resolveIdentities(); return 0; });
-
   await rawSql(`insert into ops.sync_state (resource, last_run_at, cursor) values ('__global', now(), now()) on conflict (resource) do update set last_run_at = now(), cursor = now()`);
 
   logger.info('orchestrator complete', { mode });
