@@ -49,7 +49,7 @@ export async function orchestrate(mode: Mode): Promise<void> {
   await run('ghl_pipelines',     () => syncGhlPipelines());
   await run('ghl_contacts',      () => syncGhlContacts(since));
   await run('ghl_opportunities', () => syncGhlOpportunities(since));
-  await run('ghl_messages',      () => syncGhlMessages(since));
+  // ghl_messages (conversations) skipped — not needed for current metrics
 
   await run('match', async () => { await resolveIdentities(); return 0; });
 
