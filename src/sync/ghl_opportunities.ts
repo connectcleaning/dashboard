@@ -16,12 +16,32 @@ interface GhlOpportunity {
 }
 
 export async function syncGhlOpportunities(since?: Date): Promise<number> {
-  const params: Record<string, string> = {};
-  if (since) params['startAfterDate'] = since.toISOString();
+  // Opportunities endpoint uses location_id (not locationId) and page-based pagination
+  const { env } = await import('../lib/env.js');
+  const { fetchWithRetry } = await import('../lib/http.js');
 
-  const rows: Record<string, unknown>[] = [];
-  for await (const page of ghlPages<GhlOpportunity>('/opportunities/search', params)) {
-    for (const o of page) {
+  const BASE = 'https://services.leadconnectorhq.com';
+  const headers = {
+    Authorization: `Bearer ${env.GHL_API_TOKEN}`,
+    Version: '2021-07-28',
+    'Content-Type': 'application/json',
+  };
+
+  let total = 0;
+  let page = 1;
+  while (true) {
+    const qs = new URLSearchParams({ location_id: env.GHL_LOCATION_ID, limit: '100', page: String(page) });
+    if (since) qs.set('startAfterDate', since.toISOString());
+    const res = await fetchWithRetry(`${BASE}/opportunities/search?${qs}`, { headers });
+    const data = await res.json() as { opportunities?: GhlOpportunity[]; meta?: { total?: number } };
+    const opps = data.opportunities ?? [];
+    if (opps.length === 0) break;
+
+    const seen = new Set<string>();
+    const rows: Record<string, unknown>[] = [];
+    for (const o of opps) {
+      if (seen.has(o.id)) continue;
+      seen.add(o.id);
       rows.push({
         ghl_opportunity_id: o.id,
         ghl_contact_id: o.contact?.id ?? null,
@@ -36,8 +56,11 @@ export async function syncGhlOpportunities(since?: Date): Promise<number> {
         synced_at: new Date().toISOString(),
       });
     }
+    if (rows.length) await upsert('raw', 'ghl_opportunities', rows, 'ghl_opportunity_id');
+    total += rows.length;
+    page++;
   }
-  await upsert('raw', 'ghl_opportunities', rows, 'ghl_opportunity_id');
-  logger.info('ghl_opportunities synced', { count: rows.length });
-  return rows.length;
+
+  logger.info('ghl_opportunities synced', { count: total });
+  return total;
 }
