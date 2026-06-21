@@ -4,16 +4,24 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
     "sync": "tsx --env-file=.env src/cli.ts",
     "migrate": "tsx --env-file=.env src/lib/migrate.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.2",
+    "next": "^15.5.19",
     "postgres": "^3.4.4",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "recharts": "^3.8.1",
     "ws": "^8.21.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
+    "@types/react": "19.2.17",
     "@types/ws": "^8.18.1",
     "tsx": "^4.15.0",
     "typescript": "^5.4.0"
