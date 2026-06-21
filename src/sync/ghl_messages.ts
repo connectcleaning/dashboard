@@ -29,9 +29,12 @@ export async function syncGhlMessages(since?: Date): Promise<number> {
     if (since) qs.set('startAfterDate', since.toISOString());
 
     const res = await fetchWithRetry(`${BASE}/conversations/search?${qs}`, { headers });
-    const data = await res.json() as { conversations?: GhlConversation[] };
+    const data = await res.json() as { conversations?: GhlConversation[]; meta?: { total?: number } };
     const convs = data.conversations ?? [];
     if (convs.length === 0) break;
+    // Stop once we've fetched all records reported by the API
+    const apiTotal = data.meta?.total ?? Infinity;
+    if (total >= apiTotal) break;
 
     const seen = new Set<string>();
     const rows: Record<string, unknown>[] = [];
