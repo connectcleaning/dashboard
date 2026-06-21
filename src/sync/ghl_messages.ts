@@ -38,13 +38,18 @@ export async function syncGhlMessages(since?: Date): Promise<number> {
     for (const conv of convs) {
       if (seen.has(conv.id)) continue;
       seen.add(conv.id);
+      const lastMsgDate = conv.lastMessageDate
+        ? (String(conv.lastMessageDate).length > 10
+            ? new Date(Number(conv.lastMessageDate)).toISOString()
+            : new Date(Number(conv.lastMessageDate) * 1000).toISOString())
+        : null;
       rows.push({
         message_id: conv.id,
         ghl_contact_id: conv.contactId ?? null,
         conversation_id: conv.id,
         channel: conv.type ?? null,
         direction: null,
-        created_at: conv.lastMessageDate ?? null,
+        created_at: lastMsgDate,
         raw_json: conv,
       });
     }
