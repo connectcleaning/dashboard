@@ -18,6 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: claude/lucid-wozniak-b5woi9
 
       - uses: actions/setup-node@v4
         with:
