@@ -32,7 +32,7 @@ left join raw.hcp_job_assignments a  on a.hcp_job_id = j.hcp_job_id
 left join core.service_bucket_map m  on m.match_value = j.job_type
                                      and m.match_type = 'job_type'
 left join core.job_costs cost        on cost.hcp_job_id = j.hcp_job_id
-where j.work_status = 'completed'
+where j.work_status in ('complete rated', 'complete unrated')
 group by j.hcp_job_id, c.customer_id, m.service_bucket, m.is_recurring,
          j.address_city, j.completed_at, j.total_amount,
          cost.gross_profit, cost.sub_pay;
