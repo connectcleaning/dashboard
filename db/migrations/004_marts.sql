@@ -20,7 +20,7 @@ select
   c.customer_id,
   array_agg(distinct a.hcp_employee_id)                                 as cleaner_ids,
   coalesce(m.service_bucket, j.job_type)                                as service_bucket,
-  coalesce(m.is_recurring, false)                                       as recurring_flag,
+  (j.tags::text ilike '%Recurring Job%')                                as recurring_flag,
   j.address_city                                                        as city,
   (j.raw_json->'work_timestamps'->>'completed_at')::timestamptz::date  as job_date,
   round(j.total_amount / 100.0, 2)                                      as revenue,
@@ -50,6 +50,18 @@ select
   end                                                           as days_to_close
 from raw.ghl_opportunities o
 left join marts._ghl_to_customer l on l.ghl_contact_id = o.ghl_contact_id;
+
+-- MRR: monthly recurring revenue from jobs tagged "Recurring Job"
+create or replace view marts.mrr as
+select
+  date_trunc('month', job_date)  as month,
+  count(*)                       as recurring_jobs,
+  sum(revenue)                   as recurring_revenue
+from marts.fact_job
+where recurring_flag = true
+  and job_date is not null
+group by 1
+order by 1;
 
 -- Speed-to-lead: time from first inbound message to first outbound reply, per contact
 create or replace view marts.speed_to_lead as
