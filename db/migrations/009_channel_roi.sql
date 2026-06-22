@@ -80,7 +80,9 @@ select
 from marts.fact_lead_ltv ll
 left join marts.ad_spend_by_channel s
        on s.month = ll.acquired_month
-      and s.channel = ll.channel
+      -- Spend labels Meta as "Meta Ads" (QBO category); leads normalize to
+      -- "Facebook". Align the two so Facebook ROI picks up Meta spend.
+      and case when s.channel = 'Meta Ads' then 'Facebook' else s.channel end = ll.channel
 where ll.acquired_month is not null
   and ll.channel in ('Google LSA', 'Facebook', 'Google Ads')
 group by ll.acquired_month, ll.channel, s.spend
