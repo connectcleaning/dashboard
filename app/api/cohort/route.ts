@@ -9,6 +9,7 @@ interface CohortRow {
   ltv: number;
   job_count: number;
   first_job_date: string | null;
+  mrr: number;
 }
 
 // Won customers acquired in a given month, optionally filtered to one channel.
@@ -31,9 +32,11 @@ export async function GET(req: NextRequest) {
         ll.channel,
         ll.ltv::float        as ltv,
         ll.job_count::int    as job_count,
-        ll.first_job_date::text as first_job_date
+        ll.first_job_date::text as first_job_date,
+        coalesce(m.mrr, 0)::float as mrr
       from marts.fact_lead_ltv ll
       left join core.customer c on c.customer_id = ll.customer_id
+      left join marts.customer_mrr m on m.customer_id = ll.customer_id
       where to_char(ll.acquired_month, 'YYYY-MM') = '${month}'
         and ll.job_count > 0
         ${channelFilter}

@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { RevenueChart } from './RevenueChart';
 import { RevenueMrrChart } from './RevenueMrrChart';
 
-interface CohortRow { display_name: string | null; channel: string; ltv: number; job_count: number; first_job_date: string | null }
+interface CohortRow { display_name: string | null; channel: string; ltv: number; job_count: number; first_job_date: string | null; mrr: number }
 
 // ── shared types ─────────────────────────────────────────────────────────────
 export interface MrrRow       { month: string; recurring_jobs: number; recurring_revenue: number }
@@ -17,12 +17,13 @@ export interface AdRoiRow     { month: string; ad_spend: number; revenue: number
 export interface CategoryRow  { category: string; spend: number }
 export interface ChannelRow   { channel: string; leads: number; converted: number; conversion_pct: number; total_revenue: number; avg_ltv: number }
 export interface ChannelRoiRow { month: string; channel: string; leads: number; cohort_ltv: number; channel_spend: number | null; roi: number | null }
+export interface ChannelMrrRow { month: string; channel: string; recurring_customers: number; new_mrr: number }
 
 export interface DashboardData {
   mrr: MrrRow[]; monthly: MonthlyRow[]; summary: SummaryRow[];
   opps: OppsRow[]; sources: SourceRow[];
   spend: SpendRow[]; adRoi: AdRoiRow[]; categories: CategoryRow[];
-  channelSummary: ChannelRow[]; channelRoi: ChannelRoiRow[];
+  channelSummary: ChannelRow[]; channelRoi: ChannelRoiRow[]; channelNewMrr: ChannelMrrRow[];
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -59,7 +60,8 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
   const [openCell, setOpenCell] = useState<string | null>(null);       // "YYYY-MM|Channel"
   const [cohort, setCohort] = useState<Record<string, CohortRow[]>>({});
   const [loadingCell, setLoadingCell] = useState<string | null>(null);
-  const { mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi } = data;
+  const { mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr } = data;
+  const newMrrLookup = Object.fromEntries(channelNewMrr.map(r => [`${r.month.slice(0, 7)}|${r.channel}`, r]));
 
   async function toggleCell(month: string, channel: string) {
     const key = `${month.slice(0, 7)}|${channel}`;
@@ -115,8 +117,9 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
     const rows = channelRoi.filter(r => r.channel === ch && inTtm(r.month));
     const spend = rows.reduce((a, r) => a + Number(r.channel_spend ?? 0), 0);
     const ltv   = rows.reduce((a, r) => a + Number(r.cohort_ltv), 0);
-    return [ch, { spend, ltv, roi: spend > 0 ? ltv / spend : null }];
-  })) as Record<string, { spend: number; ltv: number; roi: number | null }>;
+    const newMrr = channelNewMrr.filter(r => r.channel === ch && inTtm(r.month)).reduce((a, r) => a + Number(r.new_mrr), 0);
+    return [ch, { spend, ltv, roi: spend > 0 ? ltv / spend : null, newMrr }];
+  })) as Record<string, { spend: number; ltv: number; roi: number | null; newMrr: number }>;
 
   return (
     <>
@@ -342,7 +345,7 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
             <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
               <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Per-Channel ROI by Month Acquired</h2>
               <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>
-                Cohort LTV of leads acquired in that month ÷ channel ad spend that month. ROI builds over time as customers return. Click any ROI cell to see that channel&apos;s won customers.
+                Cohort LTV of leads acquired in that month ÷ channel ad spend that month. ROI builds over time as customers return. <strong>New MRR</strong> is the recurring monthly revenue booked from that cohort (from HCP recurring schedules). Click any ROI cell to see that channel&apos;s won customers.
               </p>
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
@@ -350,7 +353,7 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
                     <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
                       <th style={{ textAlign: 'left', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Month</th>
                       {roiChannels.map(ch => (
-                        <th key={ch} colSpan={3} style={{ textAlign: 'center', padding: '8px 8px', color: '#6b7280', fontWeight: 500, borderLeft: '1px solid #f3f4f6' }}>{ch}</th>
+                        <th key={ch} colSpan={4} style={{ textAlign: 'center', padding: '8px 8px', color: '#6b7280', fontWeight: 500, borderLeft: '1px solid #f3f4f6' }}>{ch}</th>
                       ))}
                     </tr>
                     <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
@@ -359,6 +362,7 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
                         <>
                           <th key={`${ch}-spend`} style={{ textAlign: 'right', padding: '4px 8px', color: '#9ca3af', fontWeight: 400, fontSize: 12, borderLeft: '1px solid #f3f4f6' }}>Spend</th>
                           <th key={`${ch}-ltv`}   style={{ textAlign: 'right', padding: '4px 8px', color: '#9ca3af', fontWeight: 400, fontSize: 12 }}>LTV</th>
+                          <th key={`${ch}-mrr`}   style={{ textAlign: 'right', padding: '4px 8px', color: '#9ca3af', fontWeight: 400, fontSize: 12 }}>New MRR</th>
                           <th key={`${ch}-roi`}   style={{ textAlign: 'right', padding: '4px 8px', color: '#9ca3af', fontWeight: 400, fontSize: 12 }}>ROI</th>
                         </>
                       ))}
@@ -386,6 +390,7 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
                                 <>
                                   <td key={`${ch}-spend`} style={{ padding: '10px 8px', textAlign: 'right', borderLeft: '1px solid #f3f4f6' }}>{r?.channel_spend != null ? `$${fmt(r.channel_spend)}` : '—'}</td>
                                   <td key={`${ch}-ltv`}   style={{ padding: '10px 8px', textAlign: 'right' }}>{r ? `$${fmt(r.cohort_ltv)}` : '—'}</td>
+                                  <td key={`${ch}-mrr`}   style={{ padding: '10px 8px', textAlign: 'right', color: '#6366f1' }}>{(() => { const nm = newMrrLookup[cellKey]; return nm && nm.new_mrr > 0 ? `$${fmt(nm.new_mrr)}` : '—'; })()}</td>
                                   <td
                                     key={`${ch}-roi`}
                                     onClick={clickable ? () => toggleCell(month, ch) : undefined}
@@ -406,10 +411,14 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
                           </tr>
                           {openHere && (
                             <tr key={`${month}-detail`}>
-                              <td colSpan={1 + roiChannels.length * 3} style={{ padding: 0, background: '#f9fafb', borderBottom: '1px solid #f3f4f6' }}>
+                              <td colSpan={1 + roiChannels.length * 4} style={{ padding: 0, background: '#f9fafb', borderBottom: '1px solid #f3f4f6' }}>
                                 <div style={{ padding: '12px 16px' }}>
                                   <p style={{ fontSize: 12, color: '#6b7280', margin: '0 0 8px', fontWeight: 600 }}>
                                     {openChannel} — won customers acquired {fmtMonth(month)}
+                                    {rows && rows.length > 0 && (() => {
+                                      const totalMrr = rows.reduce((a, cu) => a + Number(cu.mrr), 0);
+                                      return totalMrr > 0 ? <span style={{ color: '#6366f1' }}>{`  ·  $${fmt(totalMrr)}/mo new MRR`}</span> : null;
+                                    })()}
                                   </p>
                                   {loadingCell === openHere ? (
                                     <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>Loading…</p>
@@ -422,6 +431,7 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
                                           <th style={{ textAlign: 'left', padding: '4px 0', fontWeight: 500 }}>Customer</th>
                                           <th style={{ textAlign: 'right', padding: '4px 0', fontWeight: 500 }}>Jobs</th>
                                           <th style={{ textAlign: 'right', padding: '4px 0', fontWeight: 500 }}>LTV</th>
+                                          <th style={{ textAlign: 'right', padding: '4px 0', fontWeight: 500 }}>MRR</th>
                                         </tr>
                                       </thead>
                                       <tbody>
@@ -430,6 +440,7 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
                                             <td style={{ padding: '6px 0' }}>{cu.display_name ?? '(unnamed)'}</td>
                                             <td style={{ padding: '6px 0', textAlign: 'right' }}>{cu.job_count}</td>
                                             <td style={{ padding: '6px 0', textAlign: 'right', fontWeight: 600 }}>${fmt(cu.ltv)}</td>
+                                            <td style={{ padding: '6px 0', textAlign: 'right', color: '#6366f1' }}>{cu.mrr > 0 ? `$${fmt(cu.mrr)}` : '—'}</td>
                                           </tr>
                                         ))}
                                       </tbody>
@@ -450,6 +461,7 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
                           <>
                             <td key={`${ch}-tspend`} style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, borderLeft: '1px solid #f3f4f6' }}>{t.spend > 0 ? `$${fmt(t.spend)}` : '—'}</td>
                             <td key={`${ch}-tltv`}   style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700 }}>{t.ltv > 0 ? `$${fmt(t.ltv)}` : '—'}</td>
+                            <td key={`${ch}-tmrr`}   style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, color: '#6366f1' }}>{t.newMrr > 0 ? `$${fmt(t.newMrr)}` : '—'}</td>
                             <td key={`${ch}-troi`}   style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, color: t.roi != null && t.roi >= 3 ? '#10b981' : '#111' }}>{t.roi != null ? `${t.roi.toFixed(1)}x` : '—'}</td>
                           </>
                         );
