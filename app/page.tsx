@@ -70,7 +70,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
 
   // Pivot channel ROI rows for table display
   const channelRoiMonths = Array.from(new Set(channelRoi.map(r => r.month))).sort();
-  const roiChannels = ['Google LSA', 'Facebook', 'Google Ads'];
+  const roiChannels = ['Google LSA', 'Meta Ads', 'Google Ads'];
 
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '32px 24px' }}>
@@ -178,7 +178,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
 
           {/* Channel summary cards */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
-            {channelSummary.filter(c => ['Google LSA', 'Facebook', 'Google Ads'].includes(c.channel)).map(c => (
+            {channelSummary.filter(c => ['Google LSA', 'Meta Ads', 'Google Ads'].includes(c.channel)).map(c => (
               <div key={c.channel} style={{ background: '#fff', borderRadius: 12, padding: '20px 24px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
                 <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{c.channel}</p>
                 <p style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>${fmt(c.total_revenue)}</p>

@@ -10,7 +10,7 @@ with source_normalized as (
     customer_id,
     created_at,
     case
-      when lower(source) in ('facebook', 'facebook form', 'ig', 'instagram') then 'Facebook'
+      when lower(source) in ('facebook', 'facebook form', 'ig', 'instagram') then 'Meta Ads'
       when lower(source) = 'google lsa'  then 'Google LSA'
       when lower(source) = 'google ads'  then 'Google Ads'
       when source is null or source = '' or lower(source) = 'none' then 'Unattributed'
@@ -80,10 +80,8 @@ select
 from marts.fact_lead_ltv ll
 left join marts.ad_spend_by_channel s
        on s.month = ll.acquired_month
-      -- Spend labels Meta as "Meta Ads" (QBO category); leads normalize to
-      -- "Facebook". Align the two so Facebook ROI picks up Meta spend.
-      and case when s.channel = 'Meta Ads' then 'Facebook' else s.channel end = ll.channel
+      and s.channel = ll.channel
 where ll.acquired_month is not null
-  and ll.channel in ('Google LSA', 'Facebook', 'Google Ads')
+  and ll.channel in ('Google LSA', 'Meta Ads', 'Google Ads')
 group by ll.acquired_month, ll.channel, s.spend
 order by ll.acquired_month, ll.channel;
