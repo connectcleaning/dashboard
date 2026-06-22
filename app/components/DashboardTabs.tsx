@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { RevenueChart } from './RevenueChart';
+import { RevenueMrrChart } from './RevenueMrrChart';
 
 interface CohortRow { display_name: string | null; channel: string; ltv: number; job_count: number; first_job_date: string | null }
 
@@ -89,6 +90,7 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
   const mrrChange  = currentMrr && prevMrr
     ? ((currentMrr.recurring_revenue - prevMrr.recurring_revenue) / prevMrr.recurring_revenue * 100).toFixed(1)
     : null;
+  const mrrByMonth = Object.fromEntries(mrr.map(r => [r.month.slice(0, 7), Number(r.recurring_revenue)]));
   const wonOpps   = opps.find(o => o.status === 'won')?.count ?? 0;
   const totalOpps = opps.reduce((a, o) => a + Number(o.count), 0);
   const closeRate = totalOpps ? ((Number(wonOpps) / totalOpps) * 100).toFixed(1) : '—';
@@ -155,13 +157,12 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
 
           <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: 24 }}>
             <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Total Monthly Revenue</h2>
-            <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 20 }}>Period total: <strong>${fmt(s?.total_revenue ?? 0)}</strong></p>
-            <RevenueChart data={monthly.map(r => ({ month: fmtMonthShort(r.month), revenue: r.total_revenue }))} color="#10b981" />
-          </div>
-
-          <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: 24 }}>
-            <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 20 }}>Monthly Recurring Revenue</h2>
-            <RevenueChart data={mrr.map(r => ({ month: fmtMonthShort(r.month), revenue: r.recurring_revenue }))} color="#6366f1" />
+            <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 20 }}>Period total: <strong>${fmt(s?.total_revenue ?? 0)}</strong> · MRR shown as the inner segment of each bar</p>
+            <RevenueMrrChart data={monthly.map(r => ({
+              month: fmtMonthShort(r.month),
+              revenue: r.total_revenue,
+              mrr: mrrByMonth[r.month.slice(0, 7)] ?? 0,
+            }))} />
           </div>
 
           <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
