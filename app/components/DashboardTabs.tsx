@@ -55,25 +55,25 @@ type Tab = typeof TABS[number];
 // ── main component ────────────────────────────────────────────────────────────
 export function DashboardTabs({ data }: { data: DashboardData }) {
   const [tab, setTab] = useState<Tab>('Operations');
-  const [openMonth, setOpenMonth] = useState<string | null>(null);
+  const [openCell, setOpenCell] = useState<string | null>(null);       // "YYYY-MM|Channel"
   const [cohort, setCohort] = useState<Record<string, CohortRow[]>>({});
-  const [loadingMonth, setLoadingMonth] = useState<string | null>(null);
+  const [loadingCell, setLoadingCell] = useState<string | null>(null);
   const { mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi } = data;
 
-  async function toggleMonth(month: string) {
-    const key = month.slice(0, 7);
-    if (openMonth === key) { setOpenMonth(null); return; }
-    setOpenMonth(key);
+  async function toggleCell(month: string, channel: string) {
+    const key = `${month.slice(0, 7)}|${channel}`;
+    if (openCell === key) { setOpenCell(null); return; }
+    setOpenCell(key);
     if (!cohort[key]) {
-      setLoadingMonth(key);
+      setLoadingCell(key);
       try {
-        const res = await fetch(`/api/cohort?month=${key}`);
+        const res = await fetch(`/api/cohort?month=${month.slice(0, 7)}&channel=${encodeURIComponent(channel)}`);
         const json = await res.json();
         setCohort(prev => ({ ...prev, [key]: json.rows ?? [] }));
       } catch {
         setCohort(prev => ({ ...prev, [key]: [] }));
       } finally {
-        setLoadingMonth(null);
+        setLoadingCell(null);
       }
     }
   }
@@ -341,7 +341,7 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
             <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
               <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Per-Channel ROI by Month Acquired</h2>
               <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>
-                Cohort LTV of leads acquired in that month ÷ channel ad spend that month. ROI builds over time as customers return. Click a month to see its won customers.
+                Cohort LTV of leads acquired in that month ÷ channel ad spend that month. ROI builds over time as customers return. Click any ROI cell to see that channel&apos;s won customers.
               </p>
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
@@ -368,39 +368,49 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
                       const byChannel = Object.fromEntries(
                         channelRoi.filter(r => r.month === month).map(r => [r.channel, r])
                       );
-                      const key = month.slice(0, 7);
-                      const isOpen = openMonth === key;
-                      const rows = cohort[key];
+                      const ym = month.slice(0, 7);
+                      const openHere = openCell?.startsWith(`${ym}|`) ? openCell : null;
+                      const openChannel = openHere ? openHere.split('|')[1] : null;
+                      const rows = openHere ? cohort[openHere] : undefined;
                       return (
                         <>
-                          <tr
-                            key={month}
-                            onClick={() => toggleMonth(month)}
-                            style={{ borderBottom: '1px solid #f3f4f6', cursor: 'pointer', background: isOpen ? '#f9fafb' : undefined }}
-                          >
-                            <td style={{ padding: '10px 0' }}>
-                              <span style={{ color: '#6b7280', marginRight: 6, fontSize: 11 }}>{isOpen ? '▾' : '▸'}</span>
-                              {fmtMonth(month)}
-                            </td>
+                          <tr key={month} style={{ borderBottom: '1px solid #f3f4f6', background: openHere ? '#f9fafb' : undefined }}>
+                            <td style={{ padding: '10px 0' }}>{fmtMonth(month)}</td>
                             {roiChannels.map(ch => {
                               const r = byChannel[ch];
+                              const cellKey = `${ym}|${ch}`;
+                              const isOpen = openCell === cellKey;
+                              const clickable = !!r;
                               return (
                                 <>
                                   <td key={`${ch}-spend`} style={{ padding: '10px 8px', textAlign: 'right', borderLeft: '1px solid #f3f4f6' }}>{r?.channel_spend != null ? `$${fmt(r.channel_spend)}` : '—'}</td>
                                   <td key={`${ch}-ltv`}   style={{ padding: '10px 8px', textAlign: 'right' }}>{r ? `$${fmt(r.cohort_ltv)}` : '—'}</td>
-                                  <td key={`${ch}-roi`}   style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 600, color: r?.roi != null && r.roi >= 3 ? '#10b981' : '#111' }}>{r?.roi != null ? `${r.roi.toFixed(1)}x` : '—'}</td>
+                                  <td
+                                    key={`${ch}-roi`}
+                                    onClick={clickable ? () => toggleCell(month, ch) : undefined}
+                                    title={clickable ? 'Click to see won customers' : undefined}
+                                    style={{
+                                      padding: '10px 8px', textAlign: 'right', fontWeight: 600,
+                                      color: r?.roi != null && r.roi >= 3 ? '#10b981' : '#111',
+                                      cursor: clickable ? 'pointer' : undefined,
+                                      textDecoration: clickable ? 'underline dotted' : undefined,
+                                      background: isOpen ? '#eef2ff' : undefined,
+                                    }}
+                                  >
+                                    {r?.roi != null ? `${r.roi.toFixed(1)}x` : (r ? '0.0x' : '—')}
+                                  </td>
                                 </>
                               );
                             })}
                           </tr>
-                          {isOpen && (
+                          {openHere && (
                             <tr key={`${month}-detail`}>
                               <td colSpan={1 + roiChannels.length * 3} style={{ padding: 0, background: '#f9fafb', borderBottom: '1px solid #f3f4f6' }}>
                                 <div style={{ padding: '12px 16px' }}>
                                   <p style={{ fontSize: 12, color: '#6b7280', margin: '0 0 8px', fontWeight: 600 }}>
-                                    Won customers acquired {fmtMonth(month)}
+                                    {openChannel} — won customers acquired {fmtMonth(month)}
                                   </p>
-                                  {loadingMonth === key ? (
+                                  {loadingCell === openHere ? (
                                     <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>Loading…</p>
                                   ) : !rows || rows.length === 0 ? (
                                     <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>No won customers in this cohort.</p>
@@ -409,7 +419,6 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
                                       <thead>
                                         <tr style={{ borderBottom: '1px solid #e5e7eb', color: '#9ca3af' }}>
                                           <th style={{ textAlign: 'left', padding: '4px 0', fontWeight: 500 }}>Customer</th>
-                                          <th style={{ textAlign: 'left', padding: '4px 0', fontWeight: 500 }}>Channel</th>
                                           <th style={{ textAlign: 'right', padding: '4px 0', fontWeight: 500 }}>Jobs</th>
                                           <th style={{ textAlign: 'right', padding: '4px 0', fontWeight: 500 }}>LTV</th>
                                         </tr>
@@ -418,7 +427,6 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
                                         {rows.map((cu, i) => (
                                           <tr key={i} style={{ borderBottom: '1px solid #f3f4f6' }}>
                                             <td style={{ padding: '6px 0' }}>{cu.display_name ?? '(unnamed)'}</td>
-                                            <td style={{ padding: '6px 0', color: '#6b7280' }}>{cu.channel}</td>
                                             <td style={{ padding: '6px 0', textAlign: 'right' }}>{cu.job_count}</td>
                                             <td style={{ padding: '6px 0', textAlign: 'right', fontWeight: 600 }}>${fmt(cu.ltv)}</td>
                                           </tr>
