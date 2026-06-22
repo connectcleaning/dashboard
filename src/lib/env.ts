@@ -17,4 +17,9 @@ export const env = {
   GHL_API_TOKEN:             optional('GHL_API_TOKEN'),
   GHL_LOCATION_ID:           optional('GHL_LOCATION_ID'),
   GHL_WEBHOOK_SECRET:        optional('GHL_WEBHOOK_SECRET'),
+  QBO_CLIENT_ID:             optional('QBO_CLIENT_ID'),
+  QBO_CLIENT_SECRET:         optional('QBO_CLIENT_SECRET'),
+  QBO_REALM_ID:              optional('QBO_REALM_ID'),
+  QBO_SEED_REFRESH_TOKEN:    optional('QBO_SEED_REFRESH_TOKEN'),
+  QBO_ENVIRONMENT:           optional('QBO_ENVIRONMENT') || 'production',
 };

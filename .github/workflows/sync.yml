@@ -38,6 +38,10 @@ jobs:
           HCP_API_KEY:               ${{ secrets.HCP_API_KEY }}
           GHL_API_TOKEN:             ${{ secrets.GHL_API_TOKEN }}
           GHL_LOCATION_ID:           ${{ secrets.GHL_LOCATION_ID }}
+          QBO_CLIENT_ID:             ${{ secrets.QBO_CLIENT_ID }}
+          QBO_CLIENT_SECRET:         ${{ secrets.QBO_CLIENT_SECRET }}
+          QBO_REALM_ID:              ${{ secrets.QBO_REALM_ID }}
+          QBO_SEED_REFRESH_TOKEN:    ${{ secrets.QBO_SEED_REFRESH_TOKEN }}
 
       - name: Run full sync (nightly)
         if: github.event.schedule == '0 7 * * *' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'full')
@@ -49,6 +53,10 @@ jobs:
           HCP_API_KEY:               ${{ secrets.HCP_API_KEY }}
           GHL_API_TOKEN:             ${{ secrets.GHL_API_TOKEN }}
           GHL_LOCATION_ID:           ${{ secrets.GHL_LOCATION_ID }}
+          QBO_CLIENT_ID:             ${{ secrets.QBO_CLIENT_ID }}
+          QBO_CLIENT_SECRET:         ${{ secrets.QBO_CLIENT_SECRET }}
+          QBO_REALM_ID:              ${{ secrets.QBO_REALM_ID }}
+          QBO_SEED_REFRESH_TOKEN:    ${{ secrets.QBO_SEED_REFRESH_TOKEN }}
 
       - name: Run match only
         if: github.event_name == 'workflow_dispatch' && inputs.mode == 'match'
@@ -60,3 +68,7 @@ jobs:
           HCP_API_KEY:               ${{ secrets.HCP_API_KEY }}
           GHL_API_TOKEN:             ${{ secrets.GHL_API_TOKEN }}
           GHL_LOCATION_ID:           ${{ secrets.GHL_LOCATION_ID }}
+          QBO_CLIENT_ID:             ${{ secrets.QBO_CLIENT_ID }}
+          QBO_CLIENT_SECRET:         ${{ secrets.QBO_CLIENT_SECRET }}
+          QBO_REALM_ID:              ${{ secrets.QBO_REALM_ID }}
+          QBO_SEED_REFRESH_TOKEN:    ${{ secrets.QBO_SEED_REFRESH_TOKEN }}
