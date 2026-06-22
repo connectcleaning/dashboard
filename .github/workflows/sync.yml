@@ -2,7 +2,7 @@ name: Sync
 
 on:
   schedule:
-    - cron: '*/15 * * * *'   # incremental every 15 min
+    - cron: '0 * * * *'      # incremental every hour
     - cron: '0 7 * * *'      # full sync + match every morning at 7am UTC
   workflow_dispatch:
     inputs:
@@ -28,8 +28,8 @@ jobs:
 
       - run: npm ci
 
-      - name: Run incremental sync (every 15 min)
-        if: github.event.schedule == '*/15 * * * *' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'incremental')
+      - name: Run incremental sync (hourly)
+        if: github.event.schedule == '0 * * * *' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'incremental')
         run: npx tsx src/cli.ts incremental
         env:
           DATABASE_URL:              ${{ secrets.DATABASE_URL }}

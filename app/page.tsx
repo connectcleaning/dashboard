@@ -38,7 +38,7 @@ export default async function Dashboard() {
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '32px 24px' }}>
       <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>Connect Cleaning</h1>
-      <p style={{ color: '#6b7280', marginBottom: 32 }}>Last 12 months · updates every 15 min</p>
+      <p style={{ color: '#6b7280', marginBottom: 32 }}>Last 12 months · updates hourly</p>
 
       {/* KPI cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 40 }}>
