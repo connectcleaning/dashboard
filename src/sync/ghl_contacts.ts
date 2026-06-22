@@ -14,9 +14,10 @@ interface GhlContact {
   [k: string]: unknown;
 }
 
-export async function syncGhlContacts(since?: Date): Promise<number> {
+export async function syncGhlContacts(_since?: Date): Promise<number> {
+  // GHL /contacts/ does not support date filtering (startAfterDate is rejected).
+  // The dataset is small, so we always do a full pull; upsert dedupes by id.
   const params: Record<string, string> = {};
-  if (since) params['startAfterDate'] = since.toISOString();
 
   const rows: Record<string, unknown>[] = [];
   for await (const page of ghlPages<GhlContact>('/contacts/', params)) {

@@ -15,8 +15,9 @@ interface GhlOpportunity {
   [k: string]: unknown;
 }
 
-export async function syncGhlOpportunities(since?: Date): Promise<number> {
-  // Opportunities endpoint uses location_id (not locationId) and page-based pagination
+export async function syncGhlOpportunities(_since?: Date): Promise<number> {
+  // Opportunities endpoint uses location_id (not locationId) and page-based pagination.
+  // Dataset is small, so we always do a full pull; upsert dedupes by id.
   const { env } = await import('../lib/env.js');
   const { fetchWithRetry } = await import('../lib/http.js');
 
@@ -31,7 +32,6 @@ export async function syncGhlOpportunities(since?: Date): Promise<number> {
   let page = 1;
   while (true) {
     const qs = new URLSearchParams({ location_id: env.GHL_LOCATION_ID, limit: '100', page: String(page) });
-    if (since) qs.set('startAfterDate', since.toISOString());
     const res = await fetchWithRetry(`${BASE}/opportunities/search?${qs}`, { headers });
     const data = await res.json() as { opportunities?: GhlOpportunity[]; meta?: { total?: number } };
     const opps = data.opportunities ?? [];
