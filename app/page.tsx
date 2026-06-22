@@ -72,6 +72,24 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const channelRoiMonths = Array.from(new Set(channelRoi.map(r => r.month))).sort();
   const roiChannels = ['Google LSA', 'Meta Ads', 'Google Ads'];
 
+  // Trailing twelve months cutoff (YYYY-MM of 11 months ago, inclusive of current)
+  const ttmCutoff = (() => { const d = new Date(); d.setMonth(d.getMonth() - 11); return d.toISOString().slice(0, 7); })();
+  const inTtm = (m: string) => m.slice(0, 7) >= ttmCutoff;
+
+  // TTM totals for blended ad ROI table
+  const ttmAdRoi = adRoi.filter(r => inTtm(r.month)).reduce(
+    (a, r) => ({ spend: a.spend + Number(r.ad_spend), revenue: a.revenue + Number(r.revenue) }),
+    { spend: 0, revenue: 0 },
+  );
+
+  // TTM totals per channel for the per-channel ROI table
+  const ttmByChannel = Object.fromEntries(roiChannels.map(ch => {
+    const rows = channelRoi.filter(r => r.channel === ch && inTtm(r.month));
+    const spend = rows.reduce((a, r) => a + Number(r.channel_spend ?? 0), 0);
+    const ltv = rows.reduce((a, r) => a + Number(r.cohort_ltv), 0);
+    return [ch, { spend, ltv, roi: spend > 0 ? ltv / spend : null }];
+  })) as Record<string, { spend: number; ltv: number; roi: number | null }>;
+
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '32px 24px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 32 }}>
@@ -96,13 +114,13 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: 24 }}>
         <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Total Monthly Revenue</h2>
         <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 20 }}>Period total: <strong>${fmt(s?.total_revenue ?? 0)}</strong></p>
-        <RevenueChart data={monthly.map(r => ({ month: r.month.slice(0, 7), revenue: r.total_revenue }))} color="#10b981" />
+        <RevenueChart data={monthly.map(r => ({ month: fmtMonthShort(r.month), revenue: r.total_revenue }))} color="#10b981" />
       </div>
 
       {/* MRR chart */}
       <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: 24 }}>
         <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 20 }}>Monthly Recurring Revenue</h2>
-        <RevenueChart data={mrr.map(r => ({ month: r.month.slice(0, 7), revenue: r.recurring_revenue }))} color="#6366f1" />
+        <RevenueChart data={mrr.map(r => ({ month: fmtMonthShort(r.month), revenue: r.recurring_revenue }))} color="#6366f1" />
       </div>
 
       {/* Spend & ROI (QuickBooks) */}
@@ -116,7 +134,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
 
           <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: 24 }}>
             <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 20 }}>Total Monthly Spend</h2>
-            <RevenueChart data={spend.map(s => ({ month: s.month.slice(0, 7), revenue: s.total_spend }))} color="#ef4444" />
+            <RevenueChart data={spend.map(s => ({ month: fmtMonthShort(s.month), revenue: s.total_spend }))} color="#ef4444" />
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
@@ -155,12 +173,18 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                 <tbody>
                   {adRoi.map(r => (
                     <tr key={r.month} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                      <td style={{ padding: '10px 0' }}>{r.month.slice(0, 7)}</td>
+                      <td style={{ padding: '10px 0' }}>{fmtMonth(r.month)}</td>
                       <td style={{ padding: '10px 0', textAlign: 'right' }}>${fmt(r.ad_spend)}</td>
                       <td style={{ padding: '10px 0', textAlign: 'right' }}>${fmt(r.revenue)}</td>
                       <td style={{ padding: '10px 0', textAlign: 'right', fontWeight: 600, color: r.roi != null && r.roi >= 3 ? '#10b981' : '#111' }}>{r.roi != null ? `${r.roi.toFixed(1)}x` : '—'}</td>
                     </tr>
                   ))}
+                  <tr style={{ borderTop: '2px solid #e5e7eb' }}>
+                    <td style={{ padding: '10px 0', fontWeight: 700 }}>Trailing 12 mo</td>
+                    <td style={{ padding: '10px 0', textAlign: 'right', fontWeight: 700 }}>${fmt(ttmAdRoi.spend)}</td>
+                    <td style={{ padding: '10px 0', textAlign: 'right', fontWeight: 700 }}>${fmt(ttmAdRoi.revenue)}</td>
+                    <td style={{ padding: '10px 0', textAlign: 'right', fontWeight: 700, color: ttmAdRoi.spend > 0 && ttmAdRoi.revenue / ttmAdRoi.spend >= 3 ? '#10b981' : '#111' }}>{ttmAdRoi.spend > 0 ? `${(ttmAdRoi.revenue / ttmAdRoi.spend).toFixed(1)}x` : '—'}</td>
+                  </tr>
                 </tbody>
               </table>
             </div>
@@ -253,7 +277,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                       );
                       return (
                         <tr key={month} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                          <td style={{ padding: '10px 0' }}>{month.slice(0, 7)}</td>
+                          <td style={{ padding: '10px 0' }}>{fmtMonth(month)}</td>
                           {roiChannels.map(ch => {
                             const r = byChannel[ch];
                             return (
@@ -267,6 +291,19 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                         </tr>
                       );
                     })}
+                    <tr style={{ borderTop: '2px solid #e5e7eb' }}>
+                      <td style={{ padding: '10px 0', fontWeight: 700 }}>Trailing 12 mo</td>
+                      {roiChannels.map(ch => {
+                        const t = ttmByChannel[ch];
+                        return (
+                          <>
+                            <td key={`${ch}-tspend`} style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, borderLeft: '1px solid #f3f4f6' }}>{t.spend > 0 ? `$${fmt(t.spend)}` : '—'}</td>
+                            <td key={`${ch}-tltv`}   style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700 }}>{t.ltv > 0 ? `$${fmt(t.ltv)}` : '—'}</td>
+                            <td key={`${ch}-troi`}   style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, color: t.roi != null && t.roi >= 3 ? '#10b981' : '#111' }}>{t.roi != null ? `${t.roi.toFixed(1)}x` : '—'}</td>
+                          </>
+                        );
+                      })}
+                    </tr>
                   </tbody>
                 </table>
               </div>
@@ -337,4 +374,18 @@ function Card({ label, value, sub }: { label: string; value: string; sub?: strin
 
 function fmt(n: number) {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : n.toFixed(0);
+}
+
+// "2026-06-01..." | "2026-06" -> "June 2026"
+function fmtMonth(m: string) {
+  const [y, mo] = m.slice(0, 7).split('-');
+  const name = ['January','February','March','April','May','June','July','August','September','October','November','December'][Number(mo) - 1];
+  return name ? `${name} ${y}` : m;
+}
+
+// Shorter variant for chart axes: "Jun 2026"
+function fmtMonthShort(m: string) {
+  const [y, mo] = m.slice(0, 7).split('-');
+  const name = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(mo) - 1];
+  return name ? `${name} ${y}` : m;
 }
