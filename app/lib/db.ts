@@ -6,8 +6,16 @@ export const supabase = createClient(
   { auth: { persistSession: false } },
 );
 
-export async function query<T>(sql: string): Promise<T[]> {
-  const { data, error } = await supabase.rpc('run_sql', { query: sql });
+export async function query<T>(sql: string, params?: string[]): Promise<T[]> {
+  let resolved = sql;
+  if (params) {
+    params.forEach((p, i) => {
+      // Only allow ISO date strings (YYYY-MM-DD) to prevent injection
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(p)) throw new Error(`Invalid date param: ${p}`);
+      resolved = resolved.replaceAll(`$${i + 1}`, `'${p}'`);
+    });
+  }
+  const { data, error } = await supabase.rpc('run_sql', { query: resolved });
   if (error) throw new Error(error.message);
   return (data ?? []) as T[];
 }

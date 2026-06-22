@@ -1,5 +1,7 @@
 import { query } from './lib/db';
 import { RevenueChart } from './components/RevenueChart';
+import { DateRangePicker } from './components/DateRangePicker';
+import { Suspense } from 'react';
 
 interface MrrRow { month: string; recurring_jobs: number; recurring_revenue: number }
 interface MonthlyRow { month: string; jobs: number; total_revenue: number }
@@ -9,19 +11,37 @@ interface SourceRow { source: string; total: number; won: number; close_rate: nu
 interface SpendRow { month: string; total_spend: number }
 interface AdRoiRow { month: string; ad_spend: number; revenue: number; roi: number | null }
 interface CategoryRow { category: string; spend: number }
+interface ChannelRow { channel: string; leads: number; converted: number; conversion_pct: number; total_revenue: number; avg_ltv: number }
+interface ChannelRoiRow { month: string; channel: string; leads: number; cohort_ltv: number; channel_spend: number | null; roi: number | null }
 
 export const dynamic = 'force-dynamic';
 
-export default async function Dashboard() {
-  const [mrr, monthly, summary, opps, sources, spend, adRoi, categories] = await Promise.all([
-    query<MrrRow>(`select month::text, recurring_jobs, recurring_revenue::float from marts.mrr where month >= now() - interval '12 months' order by month`),
-    query<MonthlyRow>(`select date_trunc('month', job_date)::text as month, count(*) as jobs, sum(revenue)::float as total_revenue from marts.fact_job where job_date >= now() - interval '12 months' group by 1 order by 1`),
-    query<SummaryRow>(`select sum(revenue)::float as total_revenue, avg(revenue)::float as avg_job_size, count(*) as total_jobs from marts.fact_job where job_date >= now() - interval '12 months'`),
+type SearchParams = { from?: string; to?: string };
+
+// Default window: last 12 months
+function dateRange(sp: SearchParams) {
+  const to   = sp.to   || new Date().toISOString().slice(0, 10);
+  const from = sp.from || (() => {
+    const d = new Date(); d.setFullYear(d.getFullYear() - 1); return d.toISOString().slice(0, 10);
+  })();
+  return { from, to };
+}
+
+export default async function Dashboard({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const sp = await searchParams;
+  const { from, to } = dateRange(sp);
+
+  const [mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi] = await Promise.all([
+    query<MrrRow>(`select month::text, recurring_jobs, recurring_revenue::float from marts.mrr where month between $1 and $2 order by month`, [from, to]),
+    query<MonthlyRow>(`select date_trunc('month', job_date)::text as month, count(*) as jobs, sum(revenue)::float as total_revenue from marts.fact_job where job_date between $1 and $2 group by 1 order by 1`, [from, to]),
+    query<SummaryRow>(`select sum(revenue)::float as total_revenue, avg(revenue)::float as avg_job_size, count(*) as total_jobs from marts.fact_job where job_date between $1 and $2`, [from, to]),
     query<OppsRow>(`select status, count(*) from raw.ghl_opportunities group by status order by count desc`),
     query<SourceRow>(`select coalesce(nullif(trim(source),''), 'Unknown') as source, count(*) as total, sum(case when status='won' then 1 else 0 end) as won, round(100.0 * sum(case when status='won' then 1 else 0 end) / count(*), 1) as close_rate from raw.ghl_opportunities group by 1 having count(*) >= 5 order by close_rate desc`),
-    query<SpendRow>(`select month::text, total_spend::float from marts.monthly_spend where month >= now() - interval '12 months' order by month`).catch(() => []),
-    query<AdRoiRow>(`select month::text, ad_spend::float, revenue::float, roi::float from marts.ad_roi where month >= now() - interval '12 months' order by month`).catch(() => []),
-    query<CategoryRow>(`select coalesce(category, 'Uncategorized') as category, sum(spend)::float as spend from marts.spend_by_category where month >= now() - interval '12 months' group by 1 order by 2 desc limit 10`).catch(() => []),
+    query<SpendRow>(`select month::text, total_spend::float from marts.monthly_spend where month between $1 and $2 order by month`, [from, to]).catch(() => []),
+    query<AdRoiRow>(`select month::text, ad_spend::float, revenue::float, roi::float from marts.ad_roi where month between $1 and $2 order by month`, [from, to]).catch(() => []),
+    query<CategoryRow>(`select coalesce(category, 'Uncategorized') as category, sum(spend)::float as spend from marts.spend_by_category where month between $1 and $2 group by 1 order by 2 desc limit 10`, [from, to]).catch(() => []),
+    query<ChannelRow>(`select channel, leads::int, converted::int, conversion_pct::float, total_revenue::float, avg_ltv::float from marts.channel_summary`).catch(() => []),
+    query<ChannelRoiRow>(`select month::text, channel, leads::int, cohort_ltv::float, channel_spend::float, roi::float from marts.channel_roi_by_month where month between $1 and $2 order by month, channel`, [from, to]).catch(() => []),
   ]);
 
   const s = summary[0];
@@ -46,11 +66,23 @@ export default async function Dashboard() {
   const totalAdRevenue = adRoi.reduce((a, r) => a + Number(r.revenue), 0);
   const blendedRoi = totalAdSpend > 0 ? (totalAdRevenue / totalAdSpend) : null;
   const hasSpend = spend.length > 0;
+  const hasChannels = channelSummary.length > 0;
+
+  // Pivot channel ROI rows for table display
+  const channelRoiMonths = Array.from(new Set(channelRoi.map(r => r.month))).sort();
+  const roiChannels = ['Google LSA', 'Facebook', 'Google Ads'];
 
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '32px 24px' }}>
-      <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>Connect Cleaning</h1>
-      <p style={{ color: '#6b7280', marginBottom: 32 }}>Last 12 months · updates hourly</p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 32 }}>
+        <div>
+          <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>Connect Cleaning</h1>
+          <p style={{ color: '#6b7280' }}>updates hourly</p>
+        </div>
+        <Suspense>
+          <DateRangePicker from={from} to={to} />
+        </Suspense>
+      </div>
 
       {/* KPI cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 40 }}>
@@ -63,7 +95,7 @@ export default async function Dashboard() {
       {/* Total monthly revenue chart */}
       <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: 24 }}>
         <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Total Monthly Revenue</h2>
-        <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 20 }}>12-month total: <strong>${fmt(s?.total_revenue ?? 0)}</strong></p>
+        <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 20 }}>Period total: <strong>${fmt(s?.total_revenue ?? 0)}</strong></p>
         <RevenueChart data={monthly.map(r => ({ month: r.month.slice(0, 7), revenue: r.total_revenue }))} color="#10b981" />
       </div>
 
@@ -77,8 +109,8 @@ export default async function Dashboard() {
       {hasSpend && (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24, marginTop: 16 }}>
-            <Card label="Total Spend (12mo)" value={`$${fmt(totalSpend)}`} />
-            <Card label="Ad Spend (12mo)" value={`$${fmt(totalAdSpend)}`} />
+            <Card label="Total Spend" value={`$${fmt(totalSpend)}`} />
+            <Card label="Ad Spend" value={`$${fmt(totalAdSpend)}`} />
             <Card label="Blended Ad ROI" value={blendedRoi != null ? `${blendedRoi.toFixed(1)}x` : '—'} sub={blendedRoi != null ? `$${fmt(totalAdRevenue)} rev / $${fmt(totalAdSpend)} ad spend` : ''} />
           </div>
 
@@ -109,8 +141,8 @@ export default async function Dashboard() {
             </div>
 
             <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
-              <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Ad Spend vs Revenue (ROI)</h2>
-              <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>Blended — total revenue ÷ ad spend per month</p>
+              <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Blended Ad ROI by Month</h2>
+              <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>Total revenue ÷ total ad spend per month</p>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
@@ -133,6 +165,113 @@ export default async function Dashboard() {
               </table>
             </div>
           </div>
+        </>
+      )}
+
+      {/* Per-channel attribution */}
+      {hasChannels && (
+        <>
+          <h2 style={{ fontSize: 18, fontWeight: 700, margin: '32px 0 16px' }}>Channel Attribution</h2>
+          <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 20, marginTop: -12 }}>
+            Lifetime revenue attributed to each lead&apos;s acquisition channel (all-time cohort view, not filtered by date range above)
+          </p>
+
+          {/* Channel summary cards */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
+            {channelSummary.filter(c => ['Google LSA', 'Facebook', 'Google Ads'].includes(c.channel)).map(c => (
+              <div key={c.channel} style={{ background: '#fff', borderRadius: 12, padding: '20px 24px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+                <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{c.channel}</p>
+                <p style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>${fmt(c.total_revenue)}</p>
+                <p style={{ fontSize: 12, color: '#6b7280', marginTop: 6 }}>
+                  {c.leads} leads · {c.converted} converted ({c.conversion_pct}%) · avg LTV ${fmt(c.avg_ltv)}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          {/* Channel LTV all-time summary table */}
+          <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: 24 }}>
+            <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>All Channels — Lifetime Value Summary</h2>
+            <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>First opportunity source → total HCP revenue (customers matched across both systems)</p>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+                  <th style={{ textAlign: 'left', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Channel</th>
+                  <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Leads</th>
+                  <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Converted</th>
+                  <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Conv %</th>
+                  <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Total LTV</th>
+                  <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Avg LTV</th>
+                </tr>
+              </thead>
+              <tbody>
+                {channelSummary.map(c => (
+                  <tr key={c.channel} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                    <td style={{ padding: '10px 0' }}>{c.channel}</td>
+                    <td style={{ padding: '10px 0', textAlign: 'right' }}>{c.leads}</td>
+                    <td style={{ padding: '10px 0', textAlign: 'right' }}>{c.converted}</td>
+                    <td style={{ padding: '10px 0', textAlign: 'right' }}>{c.conversion_pct}%</td>
+                    <td style={{ padding: '10px 0', textAlign: 'right', fontWeight: 600 }}>${fmt(c.total_revenue)}</td>
+                    <td style={{ padding: '10px 0', textAlign: 'right' }}>{c.avg_ltv ? `$${fmt(c.avg_ltv)}` : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Per-channel ROI by month (cohort month × channel spend) */}
+          {channelRoi.length > 0 && (
+            <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: 24 }}>
+              <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Per-Channel ROI by Month Acquired</h2>
+              <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>
+                Cohort LTV of leads acquired in that month ÷ channel ad spend that month. ROI builds over time as customers return.
+              </p>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+                      <th style={{ textAlign: 'left', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Month</th>
+                      {roiChannels.map(ch => (
+                        <th key={ch} colSpan={3} style={{ textAlign: 'center', padding: '8px 8px', color: '#6b7280', fontWeight: 500, borderLeft: '1px solid #f3f4f6' }}>{ch}</th>
+                      ))}
+                    </tr>
+                    <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+                      <th style={{ padding: '4px 0' }} />
+                      {roiChannels.map(ch => (
+                        <>
+                          <th key={`${ch}-spend`} style={{ textAlign: 'right', padding: '4px 8px', color: '#9ca3af', fontWeight: 400, fontSize: 12, borderLeft: '1px solid #f3f4f6' }}>Spend</th>
+                          <th key={`${ch}-ltv`}   style={{ textAlign: 'right', padding: '4px 8px', color: '#9ca3af', fontWeight: 400, fontSize: 12 }}>LTV</th>
+                          <th key={`${ch}-roi`}   style={{ textAlign: 'right', padding: '4px 8px', color: '#9ca3af', fontWeight: 400, fontSize: 12 }}>ROI</th>
+                        </>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {channelRoiMonths.map(month => {
+                      const byChannel = Object.fromEntries(
+                        channelRoi.filter(r => r.month === month).map(r => [r.channel, r])
+                      );
+                      return (
+                        <tr key={month} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                          <td style={{ padding: '10px 0' }}>{month.slice(0, 7)}</td>
+                          {roiChannels.map(ch => {
+                            const r = byChannel[ch];
+                            return (
+                              <>
+                                <td key={`${ch}-spend`} style={{ padding: '10px 8px', textAlign: 'right', borderLeft: '1px solid #f3f4f6' }}>{r?.channel_spend != null ? `$${fmt(r.channel_spend)}` : '—'}</td>
+                                <td key={`${ch}-ltv`}   style={{ padding: '10px 8px', textAlign: 'right' }}>{r ? `$${fmt(r.cohort_ltv)}` : '—'}</td>
+                                <td key={`${ch}-roi`}   style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 600, color: r?.roi != null && r.roi >= 3 ? '#10b981' : '#111' }}>{r?.roi != null ? `${r.roi.toFixed(1)}x` : '—'}</td>
+                              </>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </>
       )}
 
