@@ -87,16 +87,16 @@ where month is not null
 group by 1, 2
 order by 1, 3 desc;
 
--- Advertising spend: category mentions "advert/marketing" OR vendor is a
--- known ad platform. Adjust the patterns if your chart of accounts differs.
+-- Advertising spend: paid digital ad channels only, matched on category.
+-- (See 007_qbo_adspend.sql — tuned to this company's chart of accounts.)
 create or replace view marts.ad_spend as
 select month, sum(amount) as ad_spend
 from marts.fact_spend
 where month is not null
   and (
-    category ilike '%advert%'
-    or category ilike '%marketing%'
-    or vendor ilike any (array['%google%','%facebook%','%meta%','%instagram%','%yelp%','%angi%','%thumbtack%','%nextdoor%'])
+    category ilike '%Google LSA%'
+    or category ilike '%Meta Ads%'
+    or category ilike '%Google Ads%'
   )
 group by 1
 order by 1;
