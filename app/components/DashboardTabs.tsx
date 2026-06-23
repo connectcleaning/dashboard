@@ -18,15 +18,16 @@ export interface CategoryRow  { category: string; spend: number }
 export interface ChannelRow   { channel: string; leads: number; converted: number; conversion_pct: number; total_revenue: number; avg_ltv: number }
 export interface ChannelRoiRow { month: string; channel: string; leads: number; cohort_ltv: number; channel_spend: number | null; roi: number | null }
 export interface ChannelMrrRow { month: string; channel: string; recurring_customers: number; new_mrr: number }
-export interface ChurnServiceRow { service_bucket: string; recurring_customers: number; churned_customers: number; churn_pct: number | null; churned_mrr: number; active_mrr: number }
-export interface ChurnSubRow    { cleaner_name: string; recurring_customers: number; churned_customers: number; churn_pct: number | null; churned_mrr: number; active_mrr: number }
+export interface ChurnServiceRow  { service_bucket: string; recurring_customers: number; churned_customers: number; churn_pct: number | null; churned_mrr: number; active_mrr: number }
+export interface ChurnSubRow      { cleaner_name: string; recurring_customers: number; churned_customers: number; churn_pct: number | null; churned_mrr: number; active_mrr: number }
+export interface MonthlyChurnRow  { month: string; active_start: number; churned: number; churn_pct: number | null; churned_mrr: number }
 
 export interface DashboardData {
   mrr: MrrRow[]; monthly: MonthlyRow[]; summary: SummaryRow[];
   opps: OppsRow[]; sources: SourceRow[];
   spend: SpendRow[]; adRoi: AdRoiRow[]; categories: CategoryRow[];
   channelSummary: ChannelRow[]; channelRoi: ChannelRoiRow[]; channelNewMrr: ChannelMrrRow[];
-  churnService: ChurnServiceRow[]; churnSub: ChurnSubRow[];
+  churnService: ChurnServiceRow[]; churnSub: ChurnSubRow[]; monthlyChurn: MonthlyChurnRow[];
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -63,7 +64,50 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
   const [openCell, setOpenCell] = useState<string | null>(null);       // "YYYY-MM|Channel"
   const [cohort, setCohort] = useState<Record<string, CohortRow[]>>({});
   const [loadingCell, setLoadingCell] = useState<string | null>(null);
-  const { mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr, churnService, churnSub } = data;
+
+  // churn review queue
+  type ChurnQueueRow = { hcp_customer_id: string; display_name: string | null; service_bucket: string; cleaner_name: string; last_completed: string | null; period_days: number; mrr: number; reason: string | null; status: string };
+  const [churnQueue, setChurnQueue] = useState<ChurnQueueRow[] | null>(null);
+  const [churnQueueLoading, setChurnQueueLoading] = useState(false);
+  const [openChurn, setOpenChurn] = useState<string | null>(null);   // hcp_customer_id
+  const [churnEdits, setChurnEdits] = useState<Record<string, { status: string; reason: string; notes: string }>>({});
+  const [savingChurn, setSavingChurn] = useState<string | null>(null);
+
+  async function loadChurnQueue() {
+    if (churnQueue !== null) return;
+    setChurnQueueLoading(true);
+    try {
+      const res = await fetch('/api/churn-queue');
+      const json = await res.json();
+      setChurnQueue(json.rows ?? []);
+    } catch { setChurnQueue([]); }
+    finally { setChurnQueueLoading(false); }
+  }
+
+  async function saveChurnReview(hcp_customer_id: string) {
+    const edit = churnEdits[hcp_customer_id];
+    if (!edit) return;
+    setSavingChurn(hcp_customer_id);
+    try {
+      await fetch('/api/churn-review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hcp_customer_id, ...edit }),
+      });
+      // update local queue
+      setChurnQueue(prev => prev ? prev.map(r =>
+        r.hcp_customer_id === hcp_customer_id
+          ? { ...r, status: edit.status, reason: edit.reason || null }
+          : r
+      ) : prev);
+      setOpenChurn(null);
+    } finally { setSavingChurn(null); }
+  }
+
+  function getChurnEdit(row: ChurnQueueRow) {
+    return churnEdits[row.hcp_customer_id] ?? { status: row.status, reason: row.reason ?? '', notes: '' };
+  }
+  const { mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr, churnService, churnSub, monthlyChurn } = data;
   const newMrrLookup = Object.fromEntries(channelNewMrr.map(r => [`${r.month.slice(0, 7)}|${r.channel}`, r]));
 
   async function toggleCell(month: string, channel: string) {
@@ -206,54 +250,65 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
           {/* ── CHURN ── */}
           {hasChurn && (
             <div style={{ marginTop: 24 }}>
+              {/* Summary cards */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
-                <Card label="Recurring Customers" value={churnTotals.customers.toString()} />
-                <Card label="Churned" value={churnTotals.churned.toString()} sub={overallChurnPct != null ? `${overallChurnPct.toFixed(1)}% churn rate` : ''} />
+                <Card label="Active Recurring" value={churnTotals.customers > 0 ? (churnTotals.customers - churnTotals.churned).toString() : '—'} />
                 <Card label="Active MRR" value={`$${fmt(churnTotals.activeMrr)}`} />
-                <Card label="Lost MRR" value={`$${fmt(churnTotals.churnedMrr)}`} sub="from churned schedules" />
+                <Card
+                  label="This Month's Churn"
+                  value={monthlyChurn.length > 0 && monthlyChurn[monthlyChurn.length - 1].churn_pct != null
+                    ? `${monthlyChurn[monthlyChurn.length - 1].churn_pct}%`
+                    : '—'}
+                  sub={monthlyChurn.length > 0 ? `${monthlyChurn[monthlyChurn.length - 1].churned ?? 0} customers` : ''}
+                />
+                <Card label="Lost MRR (30d)" value={`$${fmt(monthlyChurn.length > 0 ? (monthlyChurn[monthlyChurn.length - 1].churned_mrr ?? 0) : 0)}`} sub="this month" />
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                {/* By service type */}
-                <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
-                  <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Churn by Service Cadence</h2>
-                  <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>Recurring frequency · churned = no completed visit in 2× the interval</p>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
-                    <thead>
-                      <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
-                        <th style={{ textAlign: 'left', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Service</th>
-                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Cust</th>
-                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Churned</th>
-                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Churn %</th>
-                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Lost MRR</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {churnService.map(r => (
-                        <tr key={r.service_bucket} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                          <td style={{ padding: '10px 0' }}>{r.service_bucket}</td>
-                          <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.recurring_customers}</td>
-                          <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.churned_customers}</td>
-                          <td style={{ padding: '10px 0', textAlign: 'right', fontWeight: 600, color: Number(r.churn_pct) >= 25 ? '#ef4444' : '#111' }}>{r.churn_pct != null ? `${r.churn_pct}%` : '—'}</td>
-                          <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.churned_mrr > 0 ? `$${fmt(r.churned_mrr)}` : '—'}</td>
+              {/* Monthly churn trend + breakdown tables */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+                {/* Monthly trend */}
+                {monthlyChurn.length > 0 && (
+                  <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+                    <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Monthly Churn Rate</h2>
+                    <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>Customers lost ÷ active at start of month</p>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+                          <th style={{ textAlign: 'left', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Month</th>
+                          <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Active</th>
+                          <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Churned</th>
+                          <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Rate</th>
+                          <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Lost MRR</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody>
+                        {monthlyChurn.map(r => (
+                          <tr key={r.month} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                            <td style={{ padding: '8px 0' }}>{fmtMonth(r.month)}</td>
+                            <td style={{ padding: '8px 0', textAlign: 'right' }}>{r.active_start}</td>
+                            <td style={{ padding: '8px 0', textAlign: 'right' }}>{r.churned}</td>
+                            <td style={{ padding: '8px 0', textAlign: 'right', fontWeight: 600, color: Number(r.churn_pct) >= 5 ? '#ef4444' : '#10b981' }}>
+                              {r.churn_pct != null ? `${r.churn_pct}%` : '—'}
+                            </td>
+                            <td style={{ padding: '8px 0', textAlign: 'right' }}>{r.churned_mrr > 0 ? `$${fmt(r.churned_mrr)}` : '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
 
                 {/* By subcontractor */}
                 <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
                   <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Churn by Subcontractor</h2>
-                  <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>Cleaner on last visit · churned = no completed visit in 2× the interval</p>
+                  <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>Cleaner on last completed visit</p>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
                     <thead>
                       <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
                         <th style={{ textAlign: 'left', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Cleaner</th>
-                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Cust</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Active</th>
                         <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Churned</th>
-                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Churn %</th>
-                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Lost MRR</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Rate</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -263,12 +318,138 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
                           <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.recurring_customers}</td>
                           <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.churned_customers}</td>
                           <td style={{ padding: '10px 0', textAlign: 'right', fontWeight: 600, color: Number(r.churn_pct) >= 25 ? '#ef4444' : '#111' }}>{r.churn_pct != null ? `${r.churn_pct}%` : '—'}</td>
-                          <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.churned_mrr > 0 ? `$${fmt(r.churned_mrr)}` : '—'}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
+              </div>
+
+              {/* Churn review queue */}
+              <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <h2 style={{ fontSize: 16, fontWeight: 600 }}>Churned Customers — Needs Review</h2>
+                  {churnQueue === null && (
+                    <button
+                      onClick={loadChurnQueue}
+                      disabled={churnQueueLoading}
+                      style={{ fontSize: 13, padding: '6px 14px', borderRadius: 6, border: '1px solid #e5e7eb', background: '#f9fafb', cursor: 'pointer' }}
+                    >
+                      {churnQueueLoading ? 'Loading…' : 'Load queue'}
+                    </button>
+                  )}
+                </div>
+                <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>
+                  Classify each churned customer so the reason is tracked and seasonals are excluded from churn metrics.
+                </p>
+                {churnQueue === null ? (
+                  <p style={{ fontSize: 13, color: '#9ca3af' }}>Click &ldquo;Load queue&rdquo; to see churned customers.</p>
+                ) : churnQueue.length === 0 ? (
+                  <p style={{ fontSize: 13, color: '#10b981', fontWeight: 600 }}>No unreviewed churned customers.</p>
+                ) : (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+                        <th style={{ textAlign: 'left', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Customer</th>
+                        <th style={{ textAlign: 'left', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Cadence</th>
+                        <th style={{ textAlign: 'left', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Cleaner</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Last Visit</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>MRR</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Status</th>
+                        <th style={{ padding: '8px 0' }} />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {churnQueue.map(row => {
+                        const isOpen = openChurn === row.hcp_customer_id;
+                        const edit = getChurnEdit(row);
+                        const statusColor = row.status === 'seasonal' ? '#f59e0b' : '#ef4444';
+                        return (
+                          <>
+                            <tr
+                              key={row.hcp_customer_id}
+                              style={{ borderBottom: '1px solid #f3f4f6', background: isOpen ? '#f9fafb' : undefined }}
+                            >
+                              <td style={{ padding: '10px 0', fontWeight: 500 }}>{row.display_name ?? '(unnamed)'}</td>
+                              <td style={{ padding: '10px 0', color: '#6b7280' }}>{row.service_bucket}</td>
+                              <td style={{ padding: '10px 0', color: '#6b7280' }}>{row.cleaner_name}</td>
+                              <td style={{ padding: '10px 0', textAlign: 'right', color: '#6b7280' }}>
+                                {row.last_completed ? new Date(row.last_completed).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                              </td>
+                              <td style={{ padding: '10px 0', textAlign: 'right', color: '#6366f1' }}>{row.mrr > 0 ? `$${fmt(row.mrr)}` : '—'}</td>
+                              <td style={{ padding: '10px 0', textAlign: 'right' }}>
+                                <span style={{ fontSize: 12, fontWeight: 600, color: statusColor }}>
+                                  {row.status === 'seasonal' ? 'Seasonal' : 'Churned'}
+                                </span>
+                              </td>
+                              <td style={{ padding: '10px 0', textAlign: 'right' }}>
+                                <button
+                                  onClick={() => setOpenChurn(isOpen ? null : row.hcp_customer_id)}
+                                  style={{ fontSize: 12, padding: '4px 10px', borderRadius: 6, border: '1px solid #e5e7eb', background: isOpen ? '#eef2ff' : '#f9fafb', cursor: 'pointer' }}
+                                >
+                                  {isOpen ? 'Close' : 'Review'}
+                                </button>
+                              </td>
+                            </tr>
+                            {isOpen && (
+                              <tr key={`${row.hcp_customer_id}-edit`}>
+                                <td colSpan={7} style={{ padding: '12px 16px', background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
+                                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 12, alignItems: 'end' }}>
+                                    <div>
+                                      <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Status</label>
+                                      <select
+                                        value={edit.status}
+                                        onChange={e => setChurnEdits(prev => ({ ...prev, [row.hcp_customer_id]: { ...getChurnEdit(row), status: e.target.value } }))}
+                                        style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid #e5e7eb', fontSize: 13 }}
+                                      >
+                                        <option value="churned">Churned</option>
+                                        <option value="seasonal">Seasonal / Pausing</option>
+                                        <option value="active">Still Active</option>
+                                      </select>
+                                    </div>
+                                    <div>
+                                      <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Reason</label>
+                                      <select
+                                        value={edit.reason}
+                                        onChange={e => setChurnEdits(prev => ({ ...prev, [row.hcp_customer_id]: { ...getChurnEdit(row), reason: e.target.value } }))}
+                                        style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid #e5e7eb', fontSize: 13 }}
+                                      >
+                                        <option value="">— select reason —</option>
+                                        <option value="unhappy_quality">Unhappy with quality</option>
+                                        <option value="cheaper_option">Found cheaper option</option>
+                                        <option value="financial">Financial situation changed</option>
+                                        <option value="moved_deceased">Moved or deceased</option>
+                                        <option value="seasonal">Seasonal / out of town</option>
+                                        <option value="other">Other</option>
+                                      </select>
+                                    </div>
+                                    <button
+                                      onClick={() => saveChurnReview(row.hcp_customer_id)}
+                                      disabled={savingChurn === row.hcp_customer_id}
+                                      style={{ padding: '6px 16px', borderRadius: 6, border: 'none', background: '#111', color: '#fff', fontSize: 13, cursor: 'pointer', fontWeight: 600 }}
+                                    >
+                                      {savingChurn === row.hcp_customer_id ? 'Saving…' : 'Save'}
+                                    </button>
+                                  </div>
+                                  <div style={{ marginTop: 8 }}>
+                                    <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Notes (optional)</label>
+                                    <input
+                                      type="text"
+                                      value={edit.notes}
+                                      placeholder="e.g. Moving to Orlando in January"
+                                      onChange={e => setChurnEdits(prev => ({ ...prev, [row.hcp_customer_id]: { ...getChurnEdit(row), notes: e.target.value } }))}
+                                      style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid #e5e7eb', fontSize: 13, boxSizing: 'border-box' }}
+                                    />
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
               </div>
             </div>
           )}
