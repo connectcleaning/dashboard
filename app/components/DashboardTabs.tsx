@@ -216,8 +216,8 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                 {/* By service type */}
                 <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
-                  <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Churn by Service Type</h2>
-                  <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>Recurring schedule ended (past iCal UNTIL date)</p>
+                  <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Churn by Service Cadence</h2>
+                  <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>Recurring frequency · churned = schedule past its end date</p>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
                     <thead>
                       <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
