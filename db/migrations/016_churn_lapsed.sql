@@ -8,7 +8,12 @@
 -- scheduled on or after today, and CHURNED if their schedule has run out with
 -- nothing upcoming on the books.
 
-create or replace view marts.customer_churn as
+-- churn_date changes type (timestamptz), so drop and recreate the view tree.
+drop view if exists marts.churn_by_service cascade;
+drop view if exists marts.churn_by_subcontractor cascade;
+drop view if exists marts.customer_churn cascade;
+
+create view marts.customer_churn as
 with recurring as (
   select
     j.hcp_customer_id,
@@ -92,3 +97,29 @@ join marts._hcp_to_customer l on l.hcp_customer_id = c.hcp_customer_id
 join agg a on a.hcp_customer_id = c.hcp_customer_id
 left join last_cleaner lc on lc.hcp_customer_id = c.hcp_customer_id
 where c.period_days is not null;
+
+-- Recreate the aggregate views on top of the rebuilt customer_churn.
+create view marts.churn_by_service as
+select
+  service_bucket,
+  count(*)                                                              as recurring_customers,
+  sum(case when is_churned then 1 else 0 end)                           as churned_customers,
+  round(100.0 * sum(case when is_churned then 1 else 0 end) / nullif(count(*), 0), 1) as churn_pct,
+  round(sum(case when is_churned then mrr else 0 end), 2)               as churned_mrr,
+  round(sum(case when not is_churned then mrr else 0 end), 2)           as active_mrr
+from marts.customer_churn
+group by 1
+order by churn_pct desc nulls last;
+
+create view marts.churn_by_subcontractor as
+select
+  cleaner_id,
+  cleaner_name,
+  count(*)                                                              as recurring_customers,
+  sum(case when is_churned then 1 else 0 end)                           as churned_customers,
+  round(100.0 * sum(case when is_churned then 1 else 0 end) / nullif(count(*), 0), 1) as churn_pct,
+  round(sum(case when is_churned then mrr else 0 end), 2)               as churned_mrr,
+  round(sum(case when not is_churned then mrr else 0 end), 2)           as active_mrr
+from marts.customer_churn
+group by 1, 2
+order by churn_pct desc nulls last;
