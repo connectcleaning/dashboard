@@ -4,6 +4,7 @@ import { DashboardTabs } from './components/DashboardTabs';
 import type {
   MrrRow, MonthlyRow, SummaryRow, OppsRow, SourceRow,
   SpendRow, AdRoiRow, CategoryRow, ChannelRow, ChannelRoiRow, ChannelMrrRow,
+  ChurnServiceRow, ChurnSubRow,
 } from './components/DashboardTabs';
 import { Suspense } from 'react';
 
@@ -23,7 +24,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const sp = await searchParams;
   const { from, to } = dateRange(sp);
 
-  const [mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr] = await Promise.all([
+  const [mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr, churnService, churnSub] = await Promise.all([
     query<MrrRow>(`select month::text, recurring_jobs, recurring_revenue::float from marts.mrr where month between $1 and $2 order by month`, [from, to]),
     query<MonthlyRow>(`select date_trunc('month', job_date)::text as month, count(*) as jobs, sum(revenue)::float as total_revenue from marts.fact_job where job_date between $1 and $2 group by 1 order by 1`, [from, to]),
     query<SummaryRow>(`select sum(revenue)::float as total_revenue, avg(revenue)::float as avg_job_size, count(*) as total_jobs from marts.fact_job where job_date between $1 and $2`, [from, to]),
@@ -35,6 +36,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     query<ChannelRow>(`select channel, leads::int, converted::int, conversion_pct::float, total_revenue::float, avg_ltv::float from marts.channel_summary`).catch(() => []),
     query<ChannelRoiRow>(`select month::text, channel, leads::int, cohort_ltv::float, channel_spend::float, roi::float from marts.channel_roi_by_month where month between $1 and $2 order by month, channel`, [from, to]).catch(() => []),
     query<ChannelMrrRow>(`select month::text, channel, recurring_customers::int, new_mrr::float from marts.channel_new_mrr where month between $1 and $2 order by month, channel`, [from, to]).catch(() => []),
+    query<ChurnServiceRow>(`select service_bucket, recurring_customers::int, churned_customers::int, churn_pct::float, churned_mrr::float, active_mrr::float from marts.churn_by_service order by churn_pct desc nulls last`).catch(() => []),
+    query<ChurnSubRow>(`select cleaner_name, recurring_customers::int, churned_customers::int, churn_pct::float, churned_mrr::float, active_mrr::float from marts.churn_by_subcontractor order by churn_pct desc nulls last`).catch(() => []),
   ]);
 
   return (
@@ -49,7 +52,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         </Suspense>
       </div>
 
-      <DashboardTabs data={{ mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr }} />
+      <DashboardTabs data={{ mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr, churnService, churnSub }} />
     </div>
   );
 }

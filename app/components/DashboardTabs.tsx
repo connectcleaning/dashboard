@@ -18,12 +18,15 @@ export interface CategoryRow  { category: string; spend: number }
 export interface ChannelRow   { channel: string; leads: number; converted: number; conversion_pct: number; total_revenue: number; avg_ltv: number }
 export interface ChannelRoiRow { month: string; channel: string; leads: number; cohort_ltv: number; channel_spend: number | null; roi: number | null }
 export interface ChannelMrrRow { month: string; channel: string; recurring_customers: number; new_mrr: number }
+export interface ChurnServiceRow { service_bucket: string; recurring_customers: number; churned_customers: number; churn_pct: number | null; churned_mrr: number; active_mrr: number }
+export interface ChurnSubRow    { cleaner_name: string; recurring_customers: number; churned_customers: number; churn_pct: number | null; churned_mrr: number; active_mrr: number }
 
 export interface DashboardData {
   mrr: MrrRow[]; monthly: MonthlyRow[]; summary: SummaryRow[];
   opps: OppsRow[]; sources: SourceRow[];
   spend: SpendRow[]; adRoi: AdRoiRow[]; categories: CategoryRow[];
   channelSummary: ChannelRow[]; channelRoi: ChannelRoiRow[]; channelNewMrr: ChannelMrrRow[];
+  churnService: ChurnServiceRow[]; churnSub: ChurnSubRow[];
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -60,7 +63,7 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
   const [openCell, setOpenCell] = useState<string | null>(null);       // "YYYY-MM|Channel"
   const [cohort, setCohort] = useState<Record<string, CohortRow[]>>({});
   const [loadingCell, setLoadingCell] = useState<string | null>(null);
-  const { mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr } = data;
+  const { mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr, churnService, churnSub } = data;
   const newMrrLookup = Object.fromEntries(channelNewMrr.map(r => [`${r.month.slice(0, 7)}|${r.channel}`, r]));
 
   async function toggleCell(month: string, channel: string) {
@@ -103,6 +106,18 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
   const blendedRoi   = totalAdSpend > 0 ? totalAdRev / totalAdSpend : null;
   const hasSpend     = spend.length > 0;
   const hasChannels  = channelSummary.length > 0;
+
+  const hasChurn = churnService.length > 0 || churnSub.length > 0;
+  const churnTotals = churnService.reduce(
+    (a, r) => ({
+      customers: a.customers + Number(r.recurring_customers),
+      churned: a.churned + Number(r.churned_customers),
+      churnedMrr: a.churnedMrr + Number(r.churned_mrr),
+      activeMrr: a.activeMrr + Number(r.active_mrr),
+    }),
+    { customers: 0, churned: 0, churnedMrr: 0, activeMrr: 0 },
+  );
+  const overallChurnPct = churnTotals.customers > 0 ? (churnTotals.churned / churnTotals.customers) * 100 : null;
 
   const roiChannels = ['Google LSA', 'Meta Ads', 'Google Ads'];
   const channelRoiMonths = Array.from(new Set(channelRoi.map(r => r.month))).sort();
@@ -187,6 +202,76 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
               </tbody>
             </table>
           </div>
+
+          {/* ── CHURN ── */}
+          {hasChurn && (
+            <div style={{ marginTop: 24 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
+                <Card label="Recurring Customers" value={churnTotals.customers.toString()} />
+                <Card label="Churned" value={churnTotals.churned.toString()} sub={overallChurnPct != null ? `${overallChurnPct.toFixed(1)}% churn rate` : ''} />
+                <Card label="Active MRR" value={`$${fmt(churnTotals.activeMrr)}`} />
+                <Card label="Lost MRR" value={`$${fmt(churnTotals.churnedMrr)}`} sub="from churned schedules" />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                {/* By service type */}
+                <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+                  <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Churn by Service Type</h2>
+                  <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>Recurring schedule ended (past iCal UNTIL date)</p>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+                        <th style={{ textAlign: 'left', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Service</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Cust</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Churned</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Churn %</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Lost MRR</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {churnService.map(r => (
+                        <tr key={r.service_bucket} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                          <td style={{ padding: '10px 0' }}>{r.service_bucket}</td>
+                          <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.recurring_customers}</td>
+                          <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.churned_customers}</td>
+                          <td style={{ padding: '10px 0', textAlign: 'right', fontWeight: 600, color: Number(r.churn_pct) >= 25 ? '#ef4444' : '#111' }}>{r.churn_pct != null ? `${r.churn_pct}%` : '—'}</td>
+                          <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.churned_mrr > 0 ? `$${fmt(r.churned_mrr)}` : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* By subcontractor */}
+                <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+                  <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Churn by Subcontractor</h2>
+                  <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>Attributed to the cleaner on the last completed visit</p>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+                        <th style={{ textAlign: 'left', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Cleaner</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Cust</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Churned</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Churn %</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Lost MRR</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {churnSub.map(r => (
+                        <tr key={r.cleaner_name} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                          <td style={{ padding: '10px 0' }}>{r.cleaner_name}</td>
+                          <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.recurring_customers}</td>
+                          <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.churned_customers}</td>
+                          <td style={{ padding: '10px 0', textAlign: 'right', fontWeight: 600, color: Number(r.churn_pct) >= 25 ? '#ef4444' : '#111' }}>{r.churn_pct != null ? `${r.churn_pct}%` : '—'}</td>
+                          <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.churned_mrr > 0 ? `$${fmt(r.churned_mrr)}` : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
 
