@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { RevenueChart } from './RevenueChart';
 import { RevenueMrrChart } from './RevenueMrrChart';
+import { RetentionChart } from './RetentionChart';
 
 interface CohortRow { display_name: string | null; channel: string; ltv: number; job_count: number; first_job_date: string | null; mrr: number }
 
@@ -21,6 +22,8 @@ export interface ChannelMrrRow { month: string; channel: string; recurring_custo
 export interface ChurnServiceRow  { service_bucket: string; recurring_customers: number; churned_customers: number; churn_pct: number | null; churned_mrr: number; active_mrr: number }
 export interface ChurnSubRow      { cleaner_name: string; active_customers: number; base_customers: number; churned_customers: number; churn_pct: number | null; churned_mrr: number }
 export interface MonthlyChurnRow  { month: string; active_start: number; churned: number; churn_pct: number | null; churned_mrr: number }
+export interface ChurnWindowServiceRow { service_bucket: string; active_customers: number; base_customers: number; churned_customers: number; churn_pct: number | null; churned_mrr: number }
+export interface RetentionRow     { months_since_start: number; customers_observed: number; retention_pct: number | null; retained_mrr: number }
 
 export interface DashboardData {
   mrr: MrrRow[]; monthly: MonthlyRow[]; summary: SummaryRow[];
@@ -28,6 +31,7 @@ export interface DashboardData {
   spend: SpendRow[]; adRoi: AdRoiRow[]; categories: CategoryRow[];
   channelSummary: ChannelRow[]; channelRoi: ChannelRoiRow[]; channelNewMrr: ChannelMrrRow[];
   churnService: ChurnServiceRow[]; churnSub: ChurnSubRow[]; monthlyChurn: MonthlyChurnRow[];
+  churnWindowService: ChurnWindowServiceRow[]; retention: RetentionRow[];
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -107,7 +111,7 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
   function getChurnEdit(row: ChurnQueueRow) {
     return churnEdits[row.hcp_customer_id] ?? { status: row.status, reason: row.reason ?? '', notes: '' };
   }
-  const { mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr, churnService, churnSub, monthlyChurn } = data;
+  const { mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr, churnService, churnSub, monthlyChurn, churnWindowService, retention } = data;
   const newMrrLookup = Object.fromEntries(channelNewMrr.map(r => [`${r.month.slice(0, 7)}|${r.channel}`, r]));
 
   async function toggleCell(month: string, channel: string) {
@@ -168,6 +172,8 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
   const currentMonthKey = new Date().toISOString().slice(0, 7);
   const completedChurnMonths = monthlyChurn.filter(r => r.month.slice(0, 7) < currentMonthKey);
   const lastChurnMonth = completedChurnMonths[completedChurnMonths.length - 1];
+  const retentionData = retention.map(r => ({ n: r.months_since_start, retention: r.retention_pct }));
+  const retentionFloor = retention.length > 0 ? retention[retention.length - 1] : null;
 
   const roiChannels = ['Google LSA', 'Meta Ads', 'Google Ads'];
   const channelRoiMonths = Array.from(new Set(channelRoi.map(r => r.month))).sort();
@@ -333,6 +339,47 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
                     </tbody>
                   </table>
                 </div>
+              </div>
+
+              {/* Churn by service (windowed) + retention curve */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+                {/* By service type */}
+                <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+                  <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Churn by Service Type</h2>
+                  <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>Cadence · churn over last 90 days</p>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+                        <th style={{ textAlign: 'left', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Service</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Active</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Churned&nbsp;90d</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Rate</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {churnWindowService.map(r => (
+                        <tr key={r.service_bucket} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                          <td style={{ padding: '10px 0' }}>{r.service_bucket}</td>
+                          <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.active_customers}</td>
+                          <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.churned_customers}</td>
+                          <td style={{ padding: '10px 0', textAlign: 'right', fontWeight: 600, color: Number(r.churn_pct) >= 25 ? '#ef4444' : '#111' }}>{r.churn_pct != null ? `${r.churn_pct}%` : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Retention curve */}
+                {retention.length > 0 && (
+                  <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+                    <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Retention Curve</h2>
+                    <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>
+                      Share of a signup cohort still active N months later
+                      {retentionFloor?.retention_pct != null && ` · ${retentionFloor.retention_pct}% at month ${retentionFloor.months_since_start}`}
+                    </p>
+                    <RetentionChart data={retentionData} />
+                  </div>
+                )}
               </div>
 
               {/* Churn review queue */}
