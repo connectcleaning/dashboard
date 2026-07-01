@@ -37,7 +37,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     query<ChannelRoiRow>(`select month::text, channel, leads::int, cohort_ltv::float, channel_spend::float, roi::float from marts.channel_roi_by_month where month between $1 and $2 order by month, channel`, [from, to]).catch(() => []),
     query<ChannelMrrRow>(`select month::text, channel, recurring_customers::int, new_mrr::float from marts.channel_new_mrr where month between $1 and $2 order by month, channel`, [from, to]).catch(() => []),
     query<ChurnServiceRow>(`select service_bucket, recurring_customers::int, churned_customers::int, churn_pct::float, churned_mrr::float, active_mrr::float from marts.churn_by_service order by churn_pct desc nulls last`).catch(() => []),
-    query<ChurnSubRow>(`select cleaner_name, recurring_customers::int, churned_customers::int, churn_pct::float, churned_mrr::float, active_mrr::float from marts.churn_by_subcontractor order by churn_pct desc nulls last`).catch(() => []),
+    query<ChurnSubRow>(`select cleaner_name, active_customers::int, base_customers::int, churned_customers::int, churn_pct::float, churned_mrr::float from marts.churn_window_by_subcontractor order by churn_pct desc nulls last`).catch(() => []),
     query<MonthlyChurnRow>(`select month::text, active_start::int, churned::int, churn_pct::float, churned_mrr::float from marts.monthly_churn_rate order by month`).catch(() => []),
   ]);
 

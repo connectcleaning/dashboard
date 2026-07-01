@@ -19,7 +19,7 @@ export interface ChannelRow   { channel: string; leads: number; converted: numbe
 export interface ChannelRoiRow { month: string; channel: string; leads: number; cohort_ltv: number; channel_spend: number | null; roi: number | null }
 export interface ChannelMrrRow { month: string; channel: string; recurring_customers: number; new_mrr: number }
 export interface ChurnServiceRow  { service_bucket: string; recurring_customers: number; churned_customers: number; churn_pct: number | null; churned_mrr: number; active_mrr: number }
-export interface ChurnSubRow      { cleaner_name: string; recurring_customers: number; churned_customers: number; churn_pct: number | null; churned_mrr: number; active_mrr: number }
+export interface ChurnSubRow      { cleaner_name: string; active_customers: number; base_customers: number; churned_customers: number; churn_pct: number | null; churned_mrr: number }
 export interface MonthlyChurnRow  { month: string; active_start: number; churned: number; churn_pct: number | null; churned_mrr: number }
 
 export interface DashboardData {
@@ -311,13 +311,13 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
                 {/* By subcontractor */}
                 <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
                   <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Churn by Subcontractor</h2>
-                  <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>Cleaner on last completed visit · lifetime book</p>
+                  <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>Cleaner on last completed visit · churn over last 90 days</p>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
                     <thead>
                       <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
                         <th style={{ textAlign: 'left', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Cleaner</th>
-                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Customers</th>
-                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Churned</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Active</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Churned&nbsp;90d</th>
                         <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Rate</th>
                       </tr>
                     </thead>
@@ -325,7 +325,7 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
                       {churnSub.map(r => (
                         <tr key={r.cleaner_name} style={{ borderBottom: '1px solid #f3f4f6' }}>
                           <td style={{ padding: '10px 0' }}>{r.cleaner_name}</td>
-                          <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.recurring_customers}</td>
+                          <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.active_customers}</td>
                           <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.churned_customers}</td>
                           <td style={{ padding: '10px 0', textAlign: 'right', fontWeight: 600, color: Number(r.churn_pct) >= 25 ? '#ef4444' : '#111' }}>{r.churn_pct != null ? `${r.churn_pct}%` : '—'}</td>
                         </tr>
