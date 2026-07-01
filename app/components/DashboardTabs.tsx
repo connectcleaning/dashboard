@@ -162,6 +162,12 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
     { customers: 0, churned: 0, churnedMrr: 0, activeMrr: 0 },
   );
   const overallChurnPct = churnTotals.customers > 0 ? (churnTotals.churned / churnTotals.customers) * 100 : null;
+  // The last monthly_churn_rate row is the current, in-progress month: churn
+  // can't be observed until a customer misses enough visits, so it always reads
+  // 0/—. Report the last COMPLETED month instead.
+  const currentMonthKey = new Date().toISOString().slice(0, 7);
+  const completedChurnMonths = monthlyChurn.filter(r => r.month.slice(0, 7) < currentMonthKey);
+  const lastChurnMonth = completedChurnMonths[completedChurnMonths.length - 1];
 
   const roiChannels = ['Google LSA', 'Meta Ads', 'Google Ads'];
   const channelRoiMonths = Array.from(new Set(channelRoi.map(r => r.month))).sort();
@@ -255,13 +261,17 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
                 <Card label="Active Recurring" value={churnTotals.customers > 0 ? (churnTotals.customers - churnTotals.churned).toString() : '—'} />
                 <Card label="Active MRR" value={`$${fmt(churnTotals.activeMrr)}`} />
                 <Card
-                  label="This Month's Churn"
-                  value={monthlyChurn.length > 0 && monthlyChurn[monthlyChurn.length - 1].churn_pct != null
-                    ? `${monthlyChurn[monthlyChurn.length - 1].churn_pct}%`
+                  label="Last Month's Churn"
+                  value={lastChurnMonth && lastChurnMonth.churn_pct != null
+                    ? `${lastChurnMonth.churn_pct}%`
                     : '—'}
-                  sub={monthlyChurn.length > 0 ? `${monthlyChurn[monthlyChurn.length - 1].churned ?? 0} customers` : ''}
+                  sub={lastChurnMonth ? `${lastChurnMonth.churned ?? 0} of ${lastChurnMonth.active_start} · ${fmtMonth(lastChurnMonth.month)}` : ''}
                 />
-                <Card label="Lost MRR (30d)" value={`$${fmt(monthlyChurn.length > 0 ? (monthlyChurn[monthlyChurn.length - 1].churned_mrr ?? 0) : 0)}`} sub="this month" />
+                <Card
+                  label="Lost MRR"
+                  value={`$${fmt(lastChurnMonth ? (lastChurnMonth.churned_mrr ?? 0) : 0)}`}
+                  sub={lastChurnMonth ? fmtMonth(lastChurnMonth.month) : ''}
+                />
               </div>
 
               {/* Monthly churn trend + breakdown tables */}
@@ -301,12 +311,12 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
                 {/* By subcontractor */}
                 <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
                   <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Churn by Subcontractor</h2>
-                  <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>Cleaner on last completed visit</p>
+                  <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>Cleaner on last completed visit · lifetime book</p>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
                     <thead>
                       <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
                         <th style={{ textAlign: 'left', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Cleaner</th>
-                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Active</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Customers</th>
                         <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Churned</th>
                         <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Rate</th>
                       </tr>
