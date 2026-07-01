@@ -24,6 +24,7 @@ export interface ChurnSubRow      { cleaner_name: string; active_customers: numb
 export interface MonthlyChurnRow  { month: string; active_start: number; churned: number; churn_pct: number | null; churned_mrr: number }
 export interface ChurnWindowServiceRow { service_bucket: string; active_customers: number; base_customers: number; churned_customers: number; churn_pct: number | null; churned_mrr: number }
 export interface RetentionRow     { months_since_start: number; customers_observed: number; retention_pct: number | null; retained_mrr: number }
+export interface LtvServiceRow    { service_bucket: string; customers: number; avg_ltv: number; median_ltv: number; avg_visits: number; avg_mrr: number; avg_tenure_months: number | null; total_ltv: number }
 
 export interface DashboardData {
   mrr: MrrRow[]; monthly: MonthlyRow[]; summary: SummaryRow[];
@@ -32,6 +33,7 @@ export interface DashboardData {
   channelSummary: ChannelRow[]; channelRoi: ChannelRoiRow[]; channelNewMrr: ChannelMrrRow[];
   churnService: ChurnServiceRow[]; churnSub: ChurnSubRow[]; monthlyChurn: MonthlyChurnRow[];
   churnWindowService: ChurnWindowServiceRow[]; retention: RetentionRow[];
+  ltvService: LtvServiceRow[];
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -111,7 +113,7 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
   function getChurnEdit(row: ChurnQueueRow) {
     return churnEdits[row.hcp_customer_id] ?? { status: row.status, reason: row.reason ?? '', notes: '' };
   }
-  const { mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr, churnService, churnSub, monthlyChurn, churnWindowService, retention } = data;
+  const { mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr, churnService, churnSub, monthlyChurn, churnWindowService, retention, ltvService } = data;
   const newMrrLookup = Object.fromEntries(channelNewMrr.map(r => [`${r.month.slice(0, 7)}|${r.channel}`, r]));
 
   async function toggleCell(month: string, channel: string) {
@@ -381,6 +383,40 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
                   </div>
                 )}
               </div>
+
+              {/* LTV by service type */}
+              {ltvService.length > 0 && (
+                <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: 16 }}>
+                  <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Lifetime Value by Service Type</h2>
+                  <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>Revenue earned to date per recurring customer · a floor (active customers keep paying)</p>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+                        <th style={{ textAlign: 'left', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Service</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Customers</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Avg LTV</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Median LTV</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Avg Visits</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Avg MRR</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Avg Tenure</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ltvService.map(r => (
+                        <tr key={r.service_bucket} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                          <td style={{ padding: '10px 0', fontWeight: 500 }}>{r.service_bucket}</td>
+                          <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.customers}</td>
+                          <td style={{ padding: '10px 0', textAlign: 'right', fontWeight: 600, color: '#6366f1' }}>${fmt(r.avg_ltv)}</td>
+                          <td style={{ padding: '10px 0', textAlign: 'right' }}>${fmt(r.median_ltv)}</td>
+                          <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.avg_visits}</td>
+                          <td style={{ padding: '10px 0', textAlign: 'right' }}>${fmt(r.avg_mrr)}</td>
+                          <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.avg_tenure_months != null ? `${r.avg_tenure_months} mo` : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
 
               {/* Churn review queue */}
               <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
