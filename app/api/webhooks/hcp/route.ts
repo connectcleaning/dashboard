@@ -15,8 +15,6 @@ const HANDLED: Record<string, 'scheduled' | 'on_my_way' | 'completed' | 'resched
   'appointment.rescheduled': 'rescheduled',
 };
 
-// HCP wraps the job object differently across event types — try the common
-// spots. Once we see real payloads in hub.events we tighten this.
 function getJob(payload: any): any {
   return payload?.job ?? payload?.data?.job ?? payload?.data ?? payload ?? {};
 }
@@ -27,18 +25,35 @@ function firstPhone(customer: any): string | undefined {
   return customer?.mobile_number || customer?.home_number || customer?.work_number || undefined;
 }
 
+// HCP allows only one webhook URL, so the hub becomes the single front door and
+// re-emits the events your existing Zapier flows expect. Only forward the event
+// types Zapier is set up for (default: job.completed → completed-jobs sheet), so
+// enabling more events for the hub never sends Zapier anything it didn't get before.
+async function forwardToZapier(rawBody: string, eventType?: string): Promise<any> {
+  const url = process.env.ZAPIER_FORWARD_URL;
+  if (!url) return { forwarded: false, reason: 'not_configured' };
+  const events = (process.env.ZAPIER_FORWARD_EVENTS || 'job.completed').split(',').map((s) => s.trim());
+  if (!eventType || !events.includes(eventType)) return { forwarded: false, reason: 'event_not_forwarded' };
+  try {
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: rawBody });
+    return { forwarded: true, status: res.status };
+  } catch (e: any) {
+    return { forwarded: false, error: String(e?.message ?? e) };
+  }
+}
+
 export async function POST(req: NextRequest) {
-  // Shared-secret gate: set HCP_WEBHOOK_SECRET and add ?token=<secret> to the
-  // webhook URL in HCP (or send it as an x-webhook-token header).
-  const secret = process.env.HCP_WEBHOOK_SECRET;
-  if (secret) {
+  // Optional shared-secret gate (opt-in). Real HCP signature verification, using
+  // the Signing Secret, gets wired once we confirm the header from a live event.
+  if (process.env.HCP_REQUIRE_TOKEN === 'true') {
     const provided = req.nextUrl.searchParams.get('token') || req.headers.get('x-webhook-token');
-    if (provided !== secret) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+    if (provided !== process.env.HCP_WEBHOOK_SECRET) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
+  const rawBody = await req.text();
   let payload: any;
   try {
-    payload = await req.json();
+    payload = JSON.parse(rawBody);
   } catch {
     return NextResponse.json({ error: 'invalid json' }, { status: 400 });
   }
@@ -46,9 +61,18 @@ export async function POST(req: NextRequest) {
   const eventType = getEventType(payload);
   const job = getJob(payload);
   const externalId = job?.id ?? payload?.id ?? null;
+  const dryRun = process.env.HUB_DRY_RUN === 'true';
+
+  // Keep the existing Zapier → Google Sheet automation alive.
+  const forward = await forwardToZapier(rawBody, eventType);
+
+  // Capture request headers so we can confirm HCP's signature scheme and turn on
+  // real verification next.
+  const headers: Record<string, string> = {};
+  req.headers.forEach((v, k) => { headers[k] = v; });
 
   let action = 'ignored';
-  let detail: Record<string, any> = { eventType };
+  let detail: Record<string, any> = { eventType, dryRun, forward, headers };
 
   try {
     const kind = eventType ? HANDLED[eventType] : undefined;
@@ -81,18 +105,23 @@ export async function POST(req: NextRequest) {
           : kind === 'completed' ? completedMsg(ctx)
           : rescheduledMsg(ctx);
 
-        const result = await sendSmsToPhone(phone, message);
-        action = result.ok ? 'sent_sms' : 'error';
-        detail = { ...detail, ...result, message };
+        if (dryRun) {
+          // Log what we *would* do without touching GHL — safe validation.
+          action = 'dry_run';
+          detail.intended = { message, stageMove: kind === 'completed' };
+        } else {
+          const result = await sendSmsToPhone(phone, message);
+          action = result.ok ? 'sent_sms' : 'error';
+          detail = { ...detail, ...result, message };
 
-        // On completion, advance the GHL opportunity to "Job Completed (Won)".
-        // That stage transition is what fires the GHL review + referral
-        // sequences — driven off the tech's finish tap instead of a manual move.
-        if (kind === 'completed' && result.ok && result.contactId) {
-          try {
-            detail.stage_move = await markJobCompleted(result.contactId);
-          } catch (e: any) {
-            detail.stage_move = { moved: false, error: String(e?.message ?? e) };
+          // On completion, advance the GHL opportunity → "Job Completed (Won)",
+          // which fires the review + referral sequences.
+          if (kind === 'completed' && result.ok && result.contactId) {
+            try {
+              detail.stage_move = await markJobCompleted(result.contactId);
+            } catch (e: any) {
+              detail.stage_move = { moved: false, error: String(e?.message ?? e) };
+            }
           }
         }
       }
@@ -102,8 +131,7 @@ export async function POST(req: NextRequest) {
     detail.error = String(err?.message ?? err);
   }
 
-  // Always log — and never throw back to HCP, so a downstream failure doesn't
-  // trigger webhook retry storms.
+  // Always log; never throw back to HCP (avoids webhook retry storms).
   try {
     await logEvent({ source: 'hcp', event_type: eventType ?? null, external_id: externalId, payload, action, action_detail: detail });
   } catch {
