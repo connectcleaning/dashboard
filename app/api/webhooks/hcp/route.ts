@@ -61,7 +61,8 @@ export async function POST(req: NextRequest) {
   const eventType = getEventType(payload);
   const job = getJob(payload);
   const externalId = job?.id ?? payload?.id ?? null;
-  const dryRun = process.env.HUB_DRY_RUN === 'true';
+  // Fail-safe: dry-run unless explicitly disabled. A missing env var never sends.
+  const dryRun = process.env.HUB_DRY_RUN !== 'false';
 
   // Keep the existing Zapier → Google Sheet automation alive.
   const forward = await forwardToZapier(rawBody, eventType);
