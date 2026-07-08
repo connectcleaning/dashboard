@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server';
 import { logEvent } from '../../../lib/hub';
-import { sendSmsToPhone } from '../../../lib/ghl';
+import { sendSmsToPhone, markJobCompleted } from '../../../lib/ghl';
 import { scheduledMsg, onMyWayMsg, completedMsg, rescheduledMsg, type JobContext } from '../../../lib/messages';
 
 export const dynamic = 'force-dynamic';
@@ -84,6 +84,17 @@ export async function POST(req: NextRequest) {
         const result = await sendSmsToPhone(phone, message);
         action = result.ok ? 'sent_sms' : 'error';
         detail = { ...detail, ...result, message };
+
+        // On completion, advance the GHL opportunity to "Job Completed (Won)".
+        // That stage transition is what fires the GHL review + referral
+        // sequences — driven off the tech's finish tap instead of a manual move.
+        if (kind === 'completed' && result.ok && result.contactId) {
+          try {
+            detail.stage_move = await markJobCompleted(result.contactId);
+          } catch (e: any) {
+            detail.stage_move = { moved: false, error: String(e?.message ?? e) };
+          }
+        }
       }
     }
   } catch (err: any) {
