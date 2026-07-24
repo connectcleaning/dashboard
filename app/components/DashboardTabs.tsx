@@ -26,6 +26,7 @@ export interface SaveListRow      { customer: string; phone: string | null; segm
 export interface ChurnWindowServiceRow { segment: string; service_bucket: string; active_customers: number; base_customers: number; churned_customers: number; churn_pct: number | null; churned_mrr: number }
 export interface RetentionRow     { segment: string; months_since_start: number; customers_observed: number; retention_pct: number | null; retained_mrr: number }
 export interface LtvServiceRow    { segment: string; service_bucket: string; customers: number; avg_ltv: number; median_ltv: number; avg_visits: number; avg_mrr: number; avg_tenure_months: number | null; total_ltv: number }
+export interface ProjectedRevRow  { month: string; actual_revenue: number; projected_revenue: number; uninvoiced_fill: number }
 
 export interface DashboardData {
   mrr: MrrRow[]; monthly: MonthlyRow[]; summary: SummaryRow[];
@@ -35,6 +36,7 @@ export interface DashboardData {
   churnService: ChurnServiceRow[]; churnSub: ChurnSubRow[]; monthlyChurn: MonthlyChurnRow[];
   churnWindowService: ChurnWindowServiceRow[]; retention: RetentionRow[];
   ltvService: LtvServiceRow[]; saveList: SaveListRow[];
+  projectedRev: ProjectedRevRow[];
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -115,7 +117,7 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
   function getChurnEdit(row: ChurnQueueRow) {
     return churnEdits[row.hcp_customer_id] ?? { status: row.status, reason: row.reason ?? '', notes: '' };
   }
-  const { mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr, churnService, churnSub, monthlyChurn, churnWindowService, retention, ltvService, saveList } = data;
+  const { mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr, churnService, churnSub, monthlyChurn, churnWindowService, retention, ltvService, saveList, projectedRev } = data;
   const newMrrLookup = Object.fromEntries(channelNewMrr.map(r => [`${r.month.slice(0, 7)}|${r.channel}`, r]));
 
   async function toggleCell(month: string, channel: string) {
@@ -142,6 +144,10 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
   const revenueChange = currentMonth && prevMonth
     ? ((currentMonth.total_revenue - prevMonth.total_revenue) / prevMonth.total_revenue * 100).toFixed(1)
     : null;
+  // Projected revenue for the current month: actual billed jobs plus, for
+  // lump-billed recurring accounts still showing $0, their expected run-rate.
+  const thisMonthKey = new Date().toISOString().slice(0, 7);
+  const projThisMonth = projectedRev.find(r => r.month.slice(0, 7) === thisMonthKey);
   const currentMrr = mrr[mrr.length - 1];
   const prevMrr    = mrr[mrr.length - 2];
   const mrrChange  = currentMrr && prevMrr
@@ -259,7 +265,14 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
       {/* ── OPERATIONS ── */}
       {tab === 'Operations' && (
         <>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 40 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 16, marginBottom: 40 }}>
+            <Card
+              label="Projected Revenue"
+              value={`$${projThisMonth ? fmt(projThisMonth.projected_revenue) : '—'}`}
+              sub={projThisMonth
+                ? `this month · $${fmt(projThisMonth.uninvoiced_fill)} not yet invoiced`
+                : ''}
+            />
             <Card label="This Month Revenue" value={`$${currentMonth ? fmt(currentMonth.total_revenue) : '—'}`} sub={revenueChange ? `${revenueChange}% vs last month` : ''} />
             <Card label="MRR" value={`$${currentMrr ? fmt(currentMrr.recurring_revenue) : '—'}`} sub={mrrChange ? `${mrrChange}% vs last month` : ''} />
             <Card label="Avg Job Size" value={`$${(s?.avg_job_size ?? 0).toFixed(0)}`} />
