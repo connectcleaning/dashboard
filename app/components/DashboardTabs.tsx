@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { RevenueChart } from './RevenueChart';
 import { RevenueMrrChart } from './RevenueMrrChart';
+import { RetentionChart } from './RetentionChart';
 
 interface CohortRow { display_name: string | null; channel: string; ltv: number; job_count: number; first_job_date: string | null; mrr: number }
 
@@ -18,9 +19,12 @@ export interface CategoryRow  { category: string; spend: number }
 export interface ChannelRow   { channel: string; leads: number; converted: number; conversion_pct: number; total_revenue: number; avg_ltv: number }
 export interface ChannelRoiRow { month: string; channel: string; leads: number; cohort_ltv: number; channel_spend: number | null; roi: number | null }
 export interface ChannelMrrRow { month: string; channel: string; recurring_customers: number; new_mrr: number }
-export interface ChurnServiceRow  { service_bucket: string; recurring_customers: number; churned_customers: number; churn_pct: number | null; churned_mrr: number; active_mrr: number }
-export interface ChurnSubRow      { cleaner_name: string; recurring_customers: number; churned_customers: number; churn_pct: number | null; churned_mrr: number; active_mrr: number }
-export interface MonthlyChurnRow  { month: string; active_start: number; churned: number; churn_pct: number | null; churned_mrr: number }
+export interface ChurnServiceRow  { segment: string; service_bucket: string; recurring_customers: number; churned_customers: number; churn_pct: number | null; churned_mrr: number; active_mrr: number }
+export interface ChurnSubRow      { segment: string; cleaner_name: string; active_customers: number; base_customers: number; churned_customers: number; churn_pct: number | null; churned_mrr: number }
+export interface MonthlyChurnRow  { segment: string; month: string; active_start: number; churned: number; churn_pct: number | null; churned_mrr: number }
+export interface ChurnWindowServiceRow { segment: string; service_bucket: string; active_customers: number; base_customers: number; churned_customers: number; churn_pct: number | null; churned_mrr: number }
+export interface RetentionRow     { segment: string; months_since_start: number; customers_observed: number; retention_pct: number | null; retained_mrr: number }
+export interface LtvServiceRow    { segment: string; service_bucket: string; customers: number; avg_ltv: number; median_ltv: number; avg_visits: number; avg_mrr: number; avg_tenure_months: number | null; total_ltv: number }
 
 export interface DashboardData {
   mrr: MrrRow[]; monthly: MonthlyRow[]; summary: SummaryRow[];
@@ -28,6 +32,8 @@ export interface DashboardData {
   spend: SpendRow[]; adRoi: AdRoiRow[]; categories: CategoryRow[];
   channelSummary: ChannelRow[]; channelRoi: ChannelRoiRow[]; channelNewMrr: ChannelMrrRow[];
   churnService: ChurnServiceRow[]; churnSub: ChurnSubRow[]; monthlyChurn: MonthlyChurnRow[];
+  churnWindowService: ChurnWindowServiceRow[]; retention: RetentionRow[];
+  ltvService: LtvServiceRow[];
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -61,6 +67,7 @@ type Tab = typeof TABS[number];
 // ── main component ────────────────────────────────────────────────────────────
 export function DashboardTabs({ data }: { data: DashboardData }) {
   const [tab, setTab] = useState<Tab>('Operations');
+  const [segment, setSegment] = useState<'All' | 'House Cleaning' | 'Commercial'>('All');
   const [openCell, setOpenCell] = useState<string | null>(null);       // "YYYY-MM|Channel"
   const [cohort, setCohort] = useState<Record<string, CohortRow[]>>({});
   const [loadingCell, setLoadingCell] = useState<string | null>(null);
@@ -107,7 +114,7 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
   function getChurnEdit(row: ChurnQueueRow) {
     return churnEdits[row.hcp_customer_id] ?? { status: row.status, reason: row.reason ?? '', notes: '' };
   }
-  const { mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr, churnService, churnSub, monthlyChurn } = data;
+  const { mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr, churnService, churnSub, monthlyChurn, churnWindowService, retention, ltvService } = data;
   const newMrrLookup = Object.fromEntries(channelNewMrr.map(r => [`${r.month.slice(0, 7)}|${r.channel}`, r]));
 
   async function toggleCell(month: string, channel: string) {
@@ -152,7 +159,16 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
   const hasChannels  = channelSummary.length > 0;
 
   const hasChurn = churnService.length > 0 || churnSub.length > 0;
-  const churnTotals = churnService.reduce(
+  // The churn views carry a `segment` column with per-segment rows plus an 'All'
+  // roll-up. Filter every dataset to the selected segment so the toggle rescopes
+  // the whole section.
+  const churnServiceF       = churnService.filter(r => r.segment === segment);
+  const churnSubF           = churnSub.filter(r => r.segment === segment);
+  const monthlyChurnF       = monthlyChurn.filter(r => r.segment === segment);
+  const churnWindowServiceF = churnWindowService.filter(r => r.segment === segment);
+  const retentionF          = retention.filter(r => r.segment === segment);
+  const ltvServiceF         = ltvService.filter(r => r.segment === segment);
+  const churnTotals = churnServiceF.reduce(
     (a, r) => ({
       customers: a.customers + Number(r.recurring_customers),
       churned: a.churned + Number(r.churned_customers),
@@ -162,6 +178,14 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
     { customers: 0, churned: 0, churnedMrr: 0, activeMrr: 0 },
   );
   const overallChurnPct = churnTotals.customers > 0 ? (churnTotals.churned / churnTotals.customers) * 100 : null;
+  // The last monthly_churn_rate row is the current, in-progress month: churn
+  // can't be observed until a customer misses enough visits, so it always reads
+  // 0/—. Report the last COMPLETED month instead.
+  const currentMonthKey = new Date().toISOString().slice(0, 7);
+  const completedChurnMonths = monthlyChurnF.filter(r => r.month.slice(0, 7) < currentMonthKey);
+  const lastChurnMonth = completedChurnMonths[completedChurnMonths.length - 1];
+  const retentionData = retentionF.map(r => ({ n: r.months_since_start, retention: r.retention_pct }));
+  const retentionFloor = retentionF.length > 0 ? retentionF[retentionF.length - 1] : null;
 
   const roiChannels = ['Google LSA', 'Meta Ads', 'Google Ads'];
   const channelRoiMonths = Array.from(new Set(channelRoi.map(r => r.month))).sort();
@@ -250,24 +274,45 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
           {/* ── CHURN ── */}
           {hasChurn && (
             <div style={{ marginTop: 24 }}>
+              {/* Segment toggle */}
+              <div style={{ display: 'inline-flex', gap: 2, marginBottom: 16, background: '#f3f4f6', borderRadius: 8, padding: 3 }}>
+                {(['All', 'House Cleaning', 'Commercial'] as const).map(s => (
+                  <button
+                    key={s}
+                    onClick={() => setSegment(s)}
+                    style={{
+                      fontSize: 13, fontWeight: 600, padding: '6px 14px', borderRadius: 6, cursor: 'pointer', border: 'none',
+                      background: segment === s ? '#fff' : 'transparent',
+                      color: segment === s ? '#111' : '#6b7280',
+                      boxShadow: segment === s ? '0 1px 2px rgba(0,0,0,0.1)' : 'none',
+                    }}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
               {/* Summary cards */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
                 <Card label="Active Recurring" value={churnTotals.customers > 0 ? (churnTotals.customers - churnTotals.churned).toString() : '—'} />
                 <Card label="Active MRR" value={`$${fmt(churnTotals.activeMrr)}`} />
                 <Card
-                  label="This Month's Churn"
-                  value={monthlyChurn.length > 0 && monthlyChurn[monthlyChurn.length - 1].churn_pct != null
-                    ? `${monthlyChurn[monthlyChurn.length - 1].churn_pct}%`
+                  label="Last Month's Churn"
+                  value={lastChurnMonth && lastChurnMonth.churn_pct != null
+                    ? `${lastChurnMonth.churn_pct}%`
                     : '—'}
-                  sub={monthlyChurn.length > 0 ? `${monthlyChurn[monthlyChurn.length - 1].churned ?? 0} customers` : ''}
+                  sub={lastChurnMonth ? `${lastChurnMonth.churned ?? 0} of ${lastChurnMonth.active_start} · ${fmtMonth(lastChurnMonth.month)}` : ''}
                 />
-                <Card label="Lost MRR (30d)" value={`$${fmt(monthlyChurn.length > 0 ? (monthlyChurn[monthlyChurn.length - 1].churned_mrr ?? 0) : 0)}`} sub="this month" />
+                <Card
+                  label="Lost MRR"
+                  value={`$${fmt(lastChurnMonth ? (lastChurnMonth.churned_mrr ?? 0) : 0)}`}
+                  sub={lastChurnMonth ? fmtMonth(lastChurnMonth.month) : ''}
+                />
               </div>
 
               {/* Monthly churn trend + breakdown tables */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
                 {/* Monthly trend */}
-                {monthlyChurn.length > 0 && (
+                {monthlyChurnF.length > 0 && (
                   <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
                     <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Monthly Churn Rate</h2>
                     <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>Customers lost ÷ active at start of month</p>
@@ -282,7 +327,7 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
                         </tr>
                       </thead>
                       <tbody>
-                        {monthlyChurn.map(r => (
+                        {monthlyChurnF.map(r => (
                           <tr key={r.month} style={{ borderBottom: '1px solid #f3f4f6' }}>
                             <td style={{ padding: '8px 0' }}>{fmtMonth(r.month)}</td>
                             <td style={{ padding: '8px 0', textAlign: 'right' }}>{r.active_start}</td>
@@ -301,21 +346,21 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
                 {/* By subcontractor */}
                 <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
                   <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Churn by Subcontractor</h2>
-                  <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>Cleaner on last completed visit</p>
+                  <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>Cleaner on last completed visit · churn over last 90 days</p>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
                     <thead>
                       <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
                         <th style={{ textAlign: 'left', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Cleaner</th>
                         <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Active</th>
-                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Churned</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Churned&nbsp;90d</th>
                         <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Rate</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {churnSub.map(r => (
+                      {churnSubF.map(r => (
                         <tr key={r.cleaner_name} style={{ borderBottom: '1px solid #f3f4f6' }}>
                           <td style={{ padding: '10px 0' }}>{r.cleaner_name}</td>
-                          <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.recurring_customers}</td>
+                          <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.active_customers}</td>
                           <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.churned_customers}</td>
                           <td style={{ padding: '10px 0', textAlign: 'right', fontWeight: 600, color: Number(r.churn_pct) >= 25 ? '#ef4444' : '#111' }}>{r.churn_pct != null ? `${r.churn_pct}%` : '—'}</td>
                         </tr>
@@ -324,6 +369,81 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
                   </table>
                 </div>
               </div>
+
+              {/* Churn by service (windowed) + retention curve */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+                {/* By service type */}
+                <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+                  <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Churn by Service Type</h2>
+                  <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>Cadence · churn over last 90 days</p>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+                        <th style={{ textAlign: 'left', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Service</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Active</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Churned&nbsp;90d</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Rate</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {churnWindowServiceF.map(r => (
+                        <tr key={r.service_bucket} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                          <td style={{ padding: '10px 0' }}>{r.service_bucket}</td>
+                          <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.active_customers}</td>
+                          <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.churned_customers}</td>
+                          <td style={{ padding: '10px 0', textAlign: 'right', fontWeight: 600, color: Number(r.churn_pct) >= 25 ? '#ef4444' : '#111' }}>{r.churn_pct != null ? `${r.churn_pct}%` : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Retention curve */}
+                {retentionF.length > 0 && (
+                  <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+                    <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Retention Curve</h2>
+                    <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>
+                      Share of a signup cohort still active N months later
+                      {retentionFloor?.retention_pct != null && ` · ${retentionFloor.retention_pct}% at month ${retentionFloor.months_since_start}`}
+                    </p>
+                    <RetentionChart data={retentionData} />
+                  </div>
+                )}
+              </div>
+
+              {/* LTV by service type */}
+              {ltvServiceF.length > 0 && (
+                <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: 16 }}>
+                  <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Lifetime Value by Service Type</h2>
+                  <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>Revenue earned to date per recurring customer · a floor (active customers keep paying)</p>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+                        <th style={{ textAlign: 'left', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Service</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Customers</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Avg LTV</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Median LTV</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Avg Visits</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Avg MRR</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Avg Tenure</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ltvServiceF.map(r => (
+                        <tr key={r.service_bucket} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                          <td style={{ padding: '10px 0', fontWeight: 500 }}>{r.service_bucket}</td>
+                          <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.customers}</td>
+                          <td style={{ padding: '10px 0', textAlign: 'right', fontWeight: 600, color: '#6366f1' }}>${fmt(r.avg_ltv)}</td>
+                          <td style={{ padding: '10px 0', textAlign: 'right' }}>${fmt(r.median_ltv)}</td>
+                          <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.avg_visits}</td>
+                          <td style={{ padding: '10px 0', textAlign: 'right' }}>${fmt(r.avg_mrr)}</td>
+                          <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.avg_tenure_months != null ? `${r.avg_tenure_months} mo` : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
 
               {/* Churn review queue */}
               <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
@@ -611,7 +731,7 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
             <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
               <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Per-Channel ROI by Month Acquired</h2>
               <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>
-                Cohort LTV of leads acquired in that month ÷ channel ad spend that month. ROI builds over time as customers return. <strong>New MRR</strong> is the recurring monthly revenue booked from that cohort (from HCP recurring schedules). Click any ROI cell to see that channel&apos;s won customers.
+                Cohort LTV of leads acquired in that month ÷ channel ad spend that month. ROI builds over time as customers return. <strong>Active MRR</strong> is the recurring monthly revenue still active from that cohort — churned customers are excluded, so it reflects what the channel is currently worth. Click any ROI cell to see that channel&apos;s won customers.
               </p>
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
@@ -628,7 +748,7 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
                         <>
                           <th key={`${ch}-spend`} style={{ textAlign: 'right', padding: '4px 8px', color: '#9ca3af', fontWeight: 400, fontSize: 12, borderLeft: '1px solid #f3f4f6' }}>Spend</th>
                           <th key={`${ch}-ltv`}   style={{ textAlign: 'right', padding: '4px 8px', color: '#9ca3af', fontWeight: 400, fontSize: 12 }}>LTV</th>
-                          <th key={`${ch}-mrr`}   style={{ textAlign: 'right', padding: '4px 8px', color: '#9ca3af', fontWeight: 400, fontSize: 12 }}>New MRR</th>
+                          <th key={`${ch}-mrr`}   style={{ textAlign: 'right', padding: '4px 8px', color: '#9ca3af', fontWeight: 400, fontSize: 12 }}>Active MRR</th>
                           <th key={`${ch}-roi`}   style={{ textAlign: 'right', padding: '4px 8px', color: '#9ca3af', fontWeight: 400, fontSize: 12 }}>ROI</th>
                         </>
                       ))}
