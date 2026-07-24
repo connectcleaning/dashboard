@@ -21,7 +21,8 @@ export interface ChannelRoiRow { month: string; channel: string; leads: number; 
 export interface ChannelMrrRow { month: string; channel: string; recurring_customers: number; new_mrr: number }
 export interface ChurnServiceRow  { segment: string; service_bucket: string; recurring_customers: number; churned_customers: number; churn_pct: number | null; churned_mrr: number; active_mrr: number }
 export interface ChurnSubRow      { segment: string; cleaner_name: string; active_customers: number; base_customers: number; churned_customers: number; churn_pct: number | null; churned_mrr: number }
-export interface MonthlyChurnRow  { segment: string; month: string; active_start: number; churned: number; churn_pct: number | null; churned_mrr: number }
+export interface MonthlyChurnRow  { segment: string; month: string; active_start: number; churned: number; churn_pct: number | null; churned_mrr: number; active_start_mrr: number }
+export interface SaveListRow      { customer: string; phone: string | null; segment: string; service_bucket: string; cleaner_name: string; reason: string | null; last_completed: string | null; days_since_last: number; mrr: number }
 export interface ChurnWindowServiceRow { segment: string; service_bucket: string; active_customers: number; base_customers: number; churned_customers: number; churn_pct: number | null; churned_mrr: number }
 export interface RetentionRow     { segment: string; months_since_start: number; customers_observed: number; retention_pct: number | null; retained_mrr: number }
 export interface LtvServiceRow    { segment: string; service_bucket: string; customers: number; avg_ltv: number; median_ltv: number; avg_visits: number; avg_mrr: number; avg_tenure_months: number | null; total_ltv: number }
@@ -33,7 +34,7 @@ export interface DashboardData {
   channelSummary: ChannelRow[]; channelRoi: ChannelRoiRow[]; channelNewMrr: ChannelMrrRow[];
   churnService: ChurnServiceRow[]; churnSub: ChurnSubRow[]; monthlyChurn: MonthlyChurnRow[];
   churnWindowService: ChurnWindowServiceRow[]; retention: RetentionRow[];
-  ltvService: LtvServiceRow[];
+  ltvService: LtvServiceRow[]; saveList: SaveListRow[];
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -114,7 +115,7 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
   function getChurnEdit(row: ChurnQueueRow) {
     return churnEdits[row.hcp_customer_id] ?? { status: row.status, reason: row.reason ?? '', notes: '' };
   }
-  const { mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr, churnService, churnSub, monthlyChurn, churnWindowService, retention, ltvService } = data;
+  const { mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr, churnService, churnSub, monthlyChurn, churnWindowService, retention, ltvService, saveList } = data;
   const newMrrLookup = Object.fromEntries(channelNewMrr.map(r => [`${r.month.slice(0, 7)}|${r.channel}`, r]));
 
   async function toggleCell(month: string, channel: string) {
@@ -186,6 +187,30 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
   const lastChurnMonth = completedChurnMonths[completedChurnMonths.length - 1];
   const retentionData = retentionF.map(r => ({ n: r.months_since_start, retention: r.retention_pct }));
   const retentionFloor = retentionF.length > 0 ? retentionF[retentionF.length - 1] : null;
+
+  // ── Retention & Revenue scoreboard (Hormozi lens) ──
+  const CHURN_BENCHMARK = 5; // healthy monthly churn for recurring/consumer services
+  const saveListF = saveList.filter(r => segment === 'All' || r.segment === segment);
+  const last3 = completedChurnMonths.slice(-3);
+  const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+  const avg3Churn = avg(last3.map(r => Number(r.churn_pct) || 0));
+  const avgLifetimeMo = avg3Churn && avg3Churn > 0 ? 100 / avg3Churn : null;
+  const avg3RevRet = avg(last3.map(r => {
+    const s = Number(r.active_start_mrr) || 0, c = Number(r.churned_mrr) || 0;
+    return s > 0 ? (1 - c / s) * 100 : 100;
+  }));
+  const revAtRisk = saveListF.reduce((a, r) => a + Number(r.mrr), 0);
+  const churnColor = avg3Churn == null ? '#111' : avg3Churn <= CHURN_BENCHMARK ? '#10b981' : '#ef4444';
+
+  // segment-level driver rollup (dollar-ranked)
+  const segmentRollup = ['House Cleaning', 'Commercial', 'Vacation Rental'].map(seg => {
+    const rows = churnService.filter(r => r.segment === seg);
+    const activeMrr = rows.reduce((a, r) => a + Number(r.active_mrr), 0);
+    const churnedMrr = rows.reduce((a, r) => a + Number(r.churned_mrr), 0);
+    const active = rows.reduce((a, r) => a + (Number(r.recurring_customers) - Number(r.churned_customers)), 0);
+    const churned = rows.reduce((a, r) => a + Number(r.churned_customers), 0);
+    return { seg, activeMrr, churnedMrr, active, churned };
+  }).filter(s => s.active + s.churned > 0).sort((a, b) => b.churnedMrr - a.churnedMrr);
 
   const roiChannels = ['Google LSA', 'Meta Ads', 'Google Ads'];
   const channelRoiMonths = Array.from(new Set(channelRoi.map(r => r.month))).sort();
@@ -291,23 +316,53 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
                   </button>
                 ))}
               </div>
-              {/* Summary cards */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
-                <Card label="Active Recurring" value={churnTotals.customers > 0 ? (churnTotals.customers - churnTotals.churned).toString() : '—'} />
-                <Card label="Active MRR" value={`$${fmt(churnTotals.activeMrr)}`} />
-                <Card
-                  label="Last Month's Churn"
-                  value={lastChurnMonth && lastChurnMonth.churn_pct != null
-                    ? `${lastChurnMonth.churn_pct}%`
-                    : '—'}
-                  sub={lastChurnMonth ? `${lastChurnMonth.churned ?? 0} of ${lastChurnMonth.active_start} · ${fmtMonth(lastChurnMonth.month)}` : ''}
-                />
-                <Card
-                  label="Lost MRR"
-                  value={`$${fmt(lastChurnMonth ? (lastChurnMonth.churned_mrr ?? 0) : 0)}`}
-                  sub={lastChurnMonth ? fmtMonth(lastChurnMonth.month) : ''}
-                />
+              {/* Scoreboard — the vital few */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, marginBottom: 24 }}>
+                {[
+                  { label: 'Active MRR', value: `$${fmt(churnTotals.activeMrr)}`, sub: `${churnTotals.customers - churnTotals.churned} customers`, color: '#111' },
+                  { label: 'Monthly Churn', value: avg3Churn != null ? `${avg3Churn.toFixed(1)}%` : '—', sub: `vs ${CHURN_BENCHMARK}% target · last mo ${lastChurnMonth?.churn_pct ?? '—'}%`, color: churnColor },
+                  { label: 'Revenue Retention', value: avg3RevRet != null ? `${avg3RevRet.toFixed(1)}%` : '—', sub: 'monthly · 3-mo avg', color: avg3RevRet != null && avg3RevRet >= 95 ? '#10b981' : '#111' },
+                  { label: 'Avg Lifetime', value: avgLifetimeMo != null ? `${avgLifetimeMo.toFixed(0)} mo` : '—', sub: 'at current churn', color: '#111' },
+                  { label: 'Revenue at Risk', value: `$${fmt(revAtRisk)}`, sub: `${saveListF.length} winnable`, color: revAtRisk > 0 ? '#d97706' : '#111' },
+                ].map(k => (
+                  <div key={k.label} style={{ background: '#fff', borderRadius: 12, padding: '18px 18px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+                    <p style={{ fontSize: 11, color: '#6b7280', margin: '0 0 6px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>{k.label}</p>
+                    <p style={{ fontSize: 26, fontWeight: 700, margin: 0, color: k.color }}>{k.value}</p>
+                    <p style={{ fontSize: 11.5, color: '#9ca3af', marginTop: 4 }}>{k.sub}</p>
+                  </div>
+                ))}
               </div>
+
+              {/* Where the money leaks — by segment, dollar-ranked */}
+              {segmentRollup.length > 0 && (
+                <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: 16 }}>
+                  <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Where the money leaks</h2>
+                  <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>Recurring revenue by segment — active vs churned, ranked by dollars lost</p>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+                        <th style={{ textAlign: 'left', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Segment</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Active MRR</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Churned MRR</th>
+                        <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Retained</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {segmentRollup.map(s => {
+                        const ret = s.activeMrr + s.churnedMrr > 0 ? (100 * s.activeMrr / (s.activeMrr + s.churnedMrr)) : null;
+                        return (
+                          <tr key={s.seg} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                            <td style={{ padding: '10px 0', fontWeight: 500 }}>{s.seg}</td>
+                            <td style={{ padding: '10px 0', textAlign: 'right', color: '#6366f1' }}>${fmt(s.activeMrr)}</td>
+                            <td style={{ padding: '10px 0', textAlign: 'right', color: '#ef4444' }}>${fmt(s.churnedMrr)}</td>
+                            <td style={{ padding: '10px 0', textAlign: 'right', fontWeight: 600, color: ret != null && ret >= 60 ? '#10b981' : '#ef4444' }}>{ret != null ? `${ret.toFixed(0)}%` : '—'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
 
               {/* Monthly churn trend + breakdown tables */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
@@ -357,7 +412,7 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {churnSubF.map(r => (
+                      {churnSubF.filter(r => Number(r.base_customers) >= 3).sort((a, b) => Number(b.churned_mrr) - Number(a.churned_mrr)).map(r => (
                         <tr key={r.cleaner_name} style={{ borderBottom: '1px solid #f3f4f6' }}>
                           <td style={{ padding: '10px 0' }}>{r.cleaner_name}</td>
                           <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.active_customers}</td>
@@ -386,7 +441,7 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {churnWindowServiceF.map(r => (
+                      {churnWindowServiceF.filter(r => Number(r.base_customers) >= 3).sort((a, b) => Number(b.churned_mrr) - Number(a.churned_mrr)).map(r => (
                         <tr key={r.service_bucket} style={{ borderBottom: '1px solid #f3f4f6' }}>
                           <td style={{ padding: '10px 0' }}>{r.service_bucket}</td>
                           <td style={{ padding: '10px 0', textAlign: 'right' }}>{r.active_customers}</td>
@@ -442,6 +497,40 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
                       ))}
                     </tbody>
                   </table>
+                </div>
+              )}
+
+              {/* Save list — highest-value winnable churns */}
+              {saveListF.length > 0 && (
+                <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: 16, borderTop: '3px solid #d97706' }}>
+                  <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Save List — work these this week</h2>
+                  <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>Churned recurring customers ranked by MRR at stake · {saveListF.length} winnable · ${fmt(revAtRisk)}/mo on the table</p>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14, minWidth: 560 }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+                          <th style={{ textAlign: 'left', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Customer</th>
+                          <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>MRR</th>
+                          <th style={{ textAlign: 'left', padding: '8px 12px', color: '#6b7280', fontWeight: 500 }}>Segment</th>
+                          <th style={{ textAlign: 'left', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Last cleaner</th>
+                          <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Last clean</th>
+                          <th style={{ textAlign: 'right', padding: '8px 0', color: '#6b7280', fontWeight: 500 }}>Phone</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {saveListF.slice(0, 12).map((r, i) => (
+                          <tr key={i} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                            <td style={{ padding: '10px 0', fontWeight: 500 }}>{r.customer}</td>
+                            <td style={{ padding: '10px 0', textAlign: 'right', fontWeight: 600, color: '#6366f1' }}>${fmt(r.mrr)}</td>
+                            <td style={{ padding: '10px 12px', color: '#6b7280' }}>{r.segment}</td>
+                            <td style={{ padding: '10px 0', color: '#6b7280' }}>{r.cleaner_name}</td>
+                            <td style={{ padding: '10px 0', textAlign: 'right', color: r.days_since_last <= 60 ? '#d97706' : '#9ca3af' }}>{r.days_since_last}d ago</td>
+                            <td style={{ padding: '10px 0', textAlign: 'right', color: '#6b7280', fontVariantNumeric: 'tabular-nums' }}>{r.phone ?? '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
 
