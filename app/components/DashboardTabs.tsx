@@ -731,7 +731,7 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
             <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
               <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Per-Channel ROI by Month Acquired</h2>
               <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>
-                Cohort LTV of leads acquired in that month ÷ channel ad spend that month. ROI builds over time as customers return. <strong>New MRR</strong> is the recurring monthly revenue booked from that cohort (from HCP recurring schedules). Click any ROI cell to see that channel&apos;s won customers.
+                Cohort LTV of leads acquired in that month ÷ channel ad spend that month. ROI builds over time as customers return. <strong>Active MRR</strong> is the recurring monthly revenue still active from that cohort — churned customers are excluded, so it reflects what the channel is currently worth. Click any ROI cell to see that channel&apos;s won customers.
               </p>
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
@@ -748,7 +748,7 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
                         <>
                           <th key={`${ch}-spend`} style={{ textAlign: 'right', padding: '4px 8px', color: '#9ca3af', fontWeight: 400, fontSize: 12, borderLeft: '1px solid #f3f4f6' }}>Spend</th>
                           <th key={`${ch}-ltv`}   style={{ textAlign: 'right', padding: '4px 8px', color: '#9ca3af', fontWeight: 400, fontSize: 12 }}>LTV</th>
-                          <th key={`${ch}-mrr`}   style={{ textAlign: 'right', padding: '4px 8px', color: '#9ca3af', fontWeight: 400, fontSize: 12 }}>New MRR</th>
+                          <th key={`${ch}-mrr`}   style={{ textAlign: 'right', padding: '4px 8px', color: '#9ca3af', fontWeight: 400, fontSize: 12 }}>Active MRR</th>
                           <th key={`${ch}-roi`}   style={{ textAlign: 'right', padding: '4px 8px', color: '#9ca3af', fontWeight: 400, fontSize: 12 }}>ROI</th>
                         </>
                       ))}
