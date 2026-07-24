@@ -4,7 +4,7 @@ import { DashboardTabs } from './components/DashboardTabs';
 import type {
   MrrRow, MonthlyRow, SummaryRow, OppsRow, SourceRow,
   SpendRow, AdRoiRow, CategoryRow, ChannelRow, ChannelRoiRow, ChannelMrrRow,
-  ChurnServiceRow, ChurnSubRow, MonthlyChurnRow, ChurnWindowServiceRow, RetentionRow, LtvServiceRow,
+  ChurnServiceRow, ChurnSubRow, MonthlyChurnRow, ChurnWindowServiceRow, RetentionRow, LtvServiceRow, SaveListRow,
 } from './components/DashboardTabs';
 import { Suspense } from 'react';
 
@@ -24,7 +24,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const sp = await searchParams;
   const { from, to } = dateRange(sp);
 
-  const [mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr, churnService, churnSub, monthlyChurn, churnWindowService, retention, ltvService] = await Promise.all([
+  const [mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr, churnService, churnSub, monthlyChurn, churnWindowService, retention, ltvService, saveList] = await Promise.all([
     query<MrrRow>(`select month::text, recurring_jobs, recurring_revenue::float from marts.mrr where month between $1 and $2 order by month`, [from, to]),
     query<MonthlyRow>(`select date_trunc('month', job_date)::text as month, count(*) as jobs, sum(revenue)::float as total_revenue from marts.fact_job where job_date between $1 and $2 group by 1 order by 1`, [from, to]),
     query<SummaryRow>(`select sum(revenue)::float as total_revenue, avg(revenue)::float as avg_job_size, count(*) as total_jobs from marts.fact_job where job_date between $1 and $2`, [from, to]),
@@ -38,10 +38,11 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     query<ChannelMrrRow>(`select month::text, channel, recurring_customers::int, new_mrr::float from marts.channel_new_mrr where month between $1 and $2 order by month, channel`, [from, to]).catch(() => []),
     query<ChurnServiceRow>(`select segment, service_bucket, recurring_customers::int, churned_customers::int, churn_pct::float, churned_mrr::float, active_mrr::float from marts.churn_by_service order by churn_pct desc nulls last`).catch(() => []),
     query<ChurnSubRow>(`select segment, cleaner_name, active_customers::int, base_customers::int, churned_customers::int, churn_pct::float, churned_mrr::float from marts.churn_window_by_subcontractor order by churn_pct desc nulls last`).catch(() => []),
-    query<MonthlyChurnRow>(`select segment, month::text, active_start::int, churned::int, churn_pct::float, churned_mrr::float from marts.monthly_churn_rate order by month`).catch(() => []),
+    query<MonthlyChurnRow>(`select segment, month::text, active_start::int, churned::int, churn_pct::float, churned_mrr::float, active_start_mrr::float from marts.monthly_churn_rate order by month`).catch(() => []),
     query<ChurnWindowServiceRow>(`select segment, service_bucket, active_customers::int, base_customers::int, churned_customers::int, churn_pct::float, churned_mrr::float from marts.churn_window_by_service order by churn_pct desc nulls last`).catch(() => []),
     query<RetentionRow>(`select segment, months_since_start::int, customers_observed::int, retention_pct::float, retained_mrr::float from marts.retention_curve order by months_since_start`).catch(() => []),
     query<LtvServiceRow>(`select segment, service_bucket, customers::int, avg_ltv::float, median_ltv::float, avg_visits::float, avg_mrr::float, avg_tenure_months::float, total_ltv::float from marts.ltv_by_service order by customers desc`).catch(() => []),
+    query<SaveListRow>(`select customer, phone, segment, service_bucket, cleaner_name, reason, last_completed::text, days_since_last::int, mrr::float from marts.save_list limit 25`).catch(() => []),
   ]);
 
   return (
@@ -56,7 +57,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         </Suspense>
       </div>
 
-      <DashboardTabs data={{ mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr, churnService, churnSub, monthlyChurn, churnWindowService, retention, ltvService }} />
+      <DashboardTabs data={{ mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr, churnService, churnSub, monthlyChurn, churnWindowService, retention, ltvService, saveList }} />
     </div>
   );
 }
