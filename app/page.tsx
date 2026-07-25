@@ -44,7 +44,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     query<LtvServiceRow>(`select segment, service_bucket, customers::int, avg_ltv::float, median_ltv::float, avg_visits::float, avg_mrr::float, avg_tenure_months::float, total_ltv::float from marts.ltv_by_service order by customers desc`).catch(() => []),
     query<SaveListRow>(`select customer, phone, segment, service_bucket, cleaner_name, reason, last_completed::text, days_since_last::int, mrr::float from marts.save_list limit 25`).catch(() => []),
     query<ProjectedRevRow>(`select month::text, actual_revenue::float, projected_revenue::float, uninvoiced_fill::float from marts.projected_revenue_by_month where month >= date_trunc('month', now()) - interval '13 months' order by month`).catch(() => []),
-    query<ProjectedDetailRow>(`select customer, segment, service_bucket, visits::int, actual_billed::float, expected_mrr::float, uninvoiced_fill::float from marts.projected_revenue_detail where month = date_trunc('month', now())::date order by uninvoiced_fill desc, expected_mrr desc`).catch(() => []),
+    query<ProjectedDetailRow>(`select customer, segment, service_bucket, visits::int, actual_billed::float, expected_invoice::float, uninvoiced_fill::float from marts.projected_revenue_detail where month = date_trunc('month', now())::date order by uninvoiced_fill desc, expected_invoice desc`).catch(() => []),
   ]);
 
   return (

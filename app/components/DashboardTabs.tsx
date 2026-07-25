@@ -27,7 +27,7 @@ export interface ChurnWindowServiceRow { segment: string; service_bucket: string
 export interface RetentionRow     { segment: string; months_since_start: number; customers_observed: number; retention_pct: number | null; retained_mrr: number }
 export interface LtvServiceRow    { segment: string; service_bucket: string; customers: number; avg_ltv: number; median_ltv: number; avg_visits: number; avg_mrr: number; avg_tenure_months: number | null; total_ltv: number }
 export interface ProjectedRevRow  { month: string; actual_revenue: number; projected_revenue: number; uninvoiced_fill: number }
-export interface ProjectedDetailRow { customer: string; segment: string; service_bucket: string; visits: number; actual_billed: number; expected_mrr: number; uninvoiced_fill: number }
+export interface ProjectedDetailRow { customer: string; segment: string; service_bucket: string; visits: number; actual_billed: number; expected_invoice: number; uninvoiced_fill: number }
 
 export interface DashboardData {
   mrr: MrrRow[]; monthly: MonthlyRow[]; summary: SummaryRow[];
@@ -296,34 +296,32 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
             <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: 40 }}>
               <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>What&rsquo;s behind the projection — {fmtMonth(projThisMonth.month)}</h2>
               <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>
-                Lump-billed accounts (Commercial &amp; Vacation Rental). While a month is open these show $0 until the invoice lump is entered, so we fill in each account&rsquo;s run-rate. <strong>Already entered</strong> = the lump is in HCP (nothing to project). <strong>To invoice</strong> = still owed, and what the ${fmt(projThisMonth.uninvoiced_fill)} is based on.
+Commercial accounts are invoiced as a lump — the month&rsquo;s revenue is dropped on one visit at invoicing time, so the account reads $0 until then. For any that still show $0 we fill in their <strong>typical invoice</strong> (average of their actual invoices over the last 6 months). Accounts with revenue already entered are trusted as-is, and Vacation Rental / one-off work is counted only from real jobs. <strong>Already entered</strong> = nothing to project. <strong>To invoice</strong> = still owed, and what the ${fmt(projThisMonth.uninvoiced_fill)} is based on.
               </p>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                 <thead>
                   <tr style={{ textAlign: 'left', color: '#6b7280', borderBottom: '1px solid #e5e7eb' }}>
-                    <th style={{ padding: '8px 0' }}>Account</th>
-                    <th style={{ padding: '8px 0' }}>Segment</th>
+                    <th style={{ padding: '8px 0' }}>Commercial account</th>
                     <th style={{ padding: '8px 0' }}>Cadence</th>
                     <th style={{ padding: '8px 0', textAlign: 'right' }}>Visits</th>
                     <th style={{ padding: '8px 0', textAlign: 'right' }}>Billed so far</th>
-                    <th style={{ padding: '8px 0', textAlign: 'right' }}>Run-rate</th>
+                    <th style={{ padding: '8px 0', textAlign: 'right' }}>Typical invoice</th>
                     <th style={{ padding: '8px 0', textAlign: 'right' }}>To invoice</th>
                     <th style={{ padding: '8px 0', textAlign: 'right' }}>Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {[...projectedDetail]
-                    .sort((a, b) => Number(b.uninvoiced_fill) - Number(a.uninvoiced_fill) || Number(b.expected_mrr) - Number(a.expected_mrr))
+                    .sort((a, b) => Number(b.uninvoiced_fill) - Number(a.uninvoiced_fill) || Number(b.expected_invoice) - Number(a.expected_invoice))
                     .map((r, i) => {
                       const owed = Number(r.uninvoiced_fill) > 0.5;
                       return (
                         <tr key={i} style={{ borderBottom: '1px solid #f3f4f6', opacity: owed ? 1 : 0.55 }}>
                           <td style={{ padding: '8px 0', fontWeight: 500 }}>{r.customer}</td>
-                          <td style={{ padding: '8px 0', color: '#6b7280' }}>{r.segment}</td>
                           <td style={{ padding: '8px 0', color: '#6b7280' }}>{r.service_bucket}</td>
                           <td style={{ padding: '8px 0', textAlign: 'right' }}>{r.visits}</td>
                           <td style={{ padding: '8px 0', textAlign: 'right' }}>${fmt(Number(r.actual_billed))}</td>
-                          <td style={{ padding: '8px 0', textAlign: 'right' }}>${fmt(Number(r.expected_mrr))}</td>
+                          <td style={{ padding: '8px 0', textAlign: 'right', color: '#6b7280' }}>${fmt(Number(r.expected_invoice))}</td>
                           <td style={{ padding: '8px 0', textAlign: 'right', fontWeight: owed ? 700 : 400, color: owed ? '#b45309' : '#9ca3af' }}>${fmt(Number(r.uninvoiced_fill))}</td>
                           <td style={{ padding: '8px 0', textAlign: 'right' }}>
                             <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 999, background: owed ? '#fef3c7' : '#dcfce7', color: owed ? '#92400e' : '#166534', whiteSpace: 'nowrap' }}>
@@ -336,7 +334,7 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
                 </tbody>
                 <tfoot>
                   <tr style={{ borderTop: '2px solid #e5e7eb', fontWeight: 700 }}>
-                    <td style={{ padding: '10px 0' }} colSpan={6}>Not yet invoiced</td>
+                    <td style={{ padding: '10px 0' }} colSpan={5}>Not yet invoiced</td>
                     <td style={{ padding: '10px 0', textAlign: 'right', color: '#b45309' }}>${fmt(Number(projThisMonth.uninvoiced_fill))}</td>
                     <td></td>
                   </tr>
