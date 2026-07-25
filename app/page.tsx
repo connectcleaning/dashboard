@@ -4,7 +4,7 @@ import { DashboardTabs } from './components/DashboardTabs';
 import type {
   MrrRow, MonthlyRow, SummaryRow, OppsRow, SourceRow,
   SpendRow, AdRoiRow, CategoryRow, ChannelRow, ChannelRoiRow, ChannelMrrRow,
-  ChurnServiceRow, ChurnSubRow, MonthlyChurnRow, ChurnWindowServiceRow, RetentionRow, LtvServiceRow, SaveListRow, ProjectedRevRow,
+  ChurnServiceRow, ChurnSubRow, MonthlyChurnRow, ChurnWindowServiceRow, RetentionRow, LtvServiceRow, SaveListRow, ProjectedRevRow, ProjectedDetailRow,
 } from './components/DashboardTabs';
 import { Suspense } from 'react';
 
@@ -24,7 +24,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const sp = await searchParams;
   const { from, to } = dateRange(sp);
 
-  const [mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr, churnService, churnSub, monthlyChurn, churnWindowService, retention, ltvService, saveList, projectedRev] = await Promise.all([
+  const [mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr, churnService, churnSub, monthlyChurn, churnWindowService, retention, ltvService, saveList, projectedRev, projectedDetail] = await Promise.all([
     query<MrrRow>(`select month::text, recurring_jobs, recurring_revenue::float from marts.mrr where month between $1 and $2 order by month`, [from, to]),
     query<MonthlyRow>(`select date_trunc('month', job_date)::text as month, count(*) as jobs, sum(revenue)::float as total_revenue from marts.fact_job where job_date between $1 and $2 group by 1 order by 1`, [from, to]),
     query<SummaryRow>(`select sum(revenue)::float as total_revenue, avg(revenue)::float as avg_job_size, count(*) as total_jobs from marts.fact_job where job_date between $1 and $2`, [from, to]),
@@ -44,6 +44,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     query<LtvServiceRow>(`select segment, service_bucket, customers::int, avg_ltv::float, median_ltv::float, avg_visits::float, avg_mrr::float, avg_tenure_months::float, total_ltv::float from marts.ltv_by_service order by customers desc`).catch(() => []),
     query<SaveListRow>(`select customer, phone, segment, service_bucket, cleaner_name, reason, last_completed::text, days_since_last::int, mrr::float from marts.save_list limit 25`).catch(() => []),
     query<ProjectedRevRow>(`select month::text, actual_revenue::float, projected_revenue::float, uninvoiced_fill::float from marts.projected_revenue_by_month where month >= date_trunc('month', now()) - interval '13 months' order by month`).catch(() => []),
+    query<ProjectedDetailRow>(`select customer, segment, service_bucket, visits::int, actual_billed::float, expected_mrr::float, uninvoiced_fill::float from marts.projected_revenue_detail where month = date_trunc('month', now())::date order by uninvoiced_fill desc, expected_mrr desc`).catch(() => []),
   ]);
 
   return (
@@ -58,7 +59,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         </Suspense>
       </div>
 
-      <DashboardTabs data={{ mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr, churnService, churnSub, monthlyChurn, churnWindowService, retention, ltvService, saveList, projectedRev }} />
+      <DashboardTabs data={{ mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr, churnService, churnSub, monthlyChurn, churnWindowService, retention, ltvService, saveList, projectedRev, projectedDetail }} />
     </div>
   );
 }
