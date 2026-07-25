@@ -27,6 +27,7 @@ export interface ChurnWindowServiceRow { segment: string; service_bucket: string
 export interface RetentionRow     { segment: string; months_since_start: number; customers_observed: number; retention_pct: number | null; retained_mrr: number }
 export interface LtvServiceRow    { segment: string; service_bucket: string; customers: number; avg_ltv: number; median_ltv: number; avg_visits: number; avg_mrr: number; avg_tenure_months: number | null; total_ltv: number }
 export interface ProjectedRevRow  { month: string; actual_revenue: number; projected_revenue: number; uninvoiced_fill: number }
+export interface ProjectedDetailRow { customer: string; segment: string; service_bucket: string; visits: number; actual_billed: number; expected_mrr: number; uninvoiced_fill: number }
 
 export interface DashboardData {
   mrr: MrrRow[]; monthly: MonthlyRow[]; summary: SummaryRow[];
@@ -37,6 +38,7 @@ export interface DashboardData {
   churnWindowService: ChurnWindowServiceRow[]; retention: RetentionRow[];
   ltvService: LtvServiceRow[]; saveList: SaveListRow[];
   projectedRev: ProjectedRevRow[];
+  projectedDetail: ProjectedDetailRow[];
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -74,6 +76,7 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
   const [openCell, setOpenCell] = useState<string | null>(null);       // "YYYY-MM|Channel"
   const [cohort, setCohort] = useState<Record<string, CohortRow[]>>({});
   const [loadingCell, setLoadingCell] = useState<string | null>(null);
+  const [showProjDetail, setShowProjDetail] = useState(false);
 
   // churn review queue
   type ChurnQueueRow = { hcp_customer_id: string; display_name: string | null; service_bucket: string; cleaner_name: string; last_completed: string | null; period_days: number; mrr: number; reason: string | null; status: string };
@@ -117,7 +120,7 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
   function getChurnEdit(row: ChurnQueueRow) {
     return churnEdits[row.hcp_customer_id] ?? { status: row.status, reason: row.reason ?? '', notes: '' };
   }
-  const { mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr, churnService, churnSub, monthlyChurn, churnWindowService, retention, ltvService, saveList, projectedRev } = data;
+  const { mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr, churnService, churnSub, monthlyChurn, churnWindowService, retention, ltvService, saveList, projectedRev, projectedDetail } = data;
   const newMrrLookup = Object.fromEntries(channelNewMrr.map(r => [`${r.month.slice(0, 7)}|${r.channel}`, r]));
 
   async function toggleCell(month: string, channel: string) {
@@ -265,19 +268,82 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
       {/* ── OPERATIONS ── */}
       {tab === 'Operations' && (
         <>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 16, marginBottom: 40 }}>
-            <Card
-              label="Projected Revenue"
-              value={`$${projThisMonth ? fmt(projThisMonth.projected_revenue) : '—'}`}
-              sub={projThisMonth
-                ? `this month · $${fmt(projThisMonth.uninvoiced_fill)} not yet invoiced`
-                : ''}
-            />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 16, marginBottom: projThisMonth && showProjDetail ? 16 : 40 }}>
+            <div
+              onClick={() => projThisMonth && setShowProjDetail(v => !v)}
+              style={{
+                background: '#fff', borderRadius: 12, padding: '20px 24px',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                cursor: projThisMonth ? 'pointer' : 'default',
+                outline: showProjDetail ? '2px solid #111' : 'none',
+              }}
+            >
+              <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Projected Revenue</p>
+              <p style={{ fontSize: 28, fontWeight: 700, margin: 0 }}>${projThisMonth ? fmt(projThisMonth.projected_revenue) : '—'}</p>
+              {projThisMonth && (
+                <p style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+                  this month · <span style={{ color: '#2563eb', textDecoration: 'underline', textUnderlineOffset: 2 }}>${fmt(projThisMonth.uninvoiced_fill)} not yet invoiced {showProjDetail ? '▲' : '▼'}</span>
+                </p>
+              )}
+            </div>
             <Card label="This Month Revenue" value={`$${currentMonth ? fmt(currentMonth.total_revenue) : '—'}`} sub={revenueChange ? `${revenueChange}% vs last month` : ''} />
             <Card label="MRR" value={`$${currentMrr ? fmt(currentMrr.recurring_revenue) : '—'}`} sub={mrrChange ? `${mrrChange}% vs last month` : ''} />
             <Card label="Avg Job Size" value={`$${(s?.avg_job_size ?? 0).toFixed(0)}`} />
             <Card label="Total Jobs" value={(s?.total_jobs ?? 0).toString()} />
           </div>
+
+          {projThisMonth && showProjDetail && (
+            <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: 40 }}>
+              <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>What&rsquo;s behind the projection — {fmtMonth(projThisMonth.month)}</h2>
+              <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>
+                Lump-billed accounts (Commercial &amp; Vacation Rental). While a month is open these show $0 until the invoice lump is entered, so we fill in each account&rsquo;s run-rate. <strong>Already entered</strong> = the lump is in HCP (nothing to project). <strong>To invoice</strong> = still owed, and what the ${fmt(projThisMonth.uninvoiced_fill)} is based on.
+              </p>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ textAlign: 'left', color: '#6b7280', borderBottom: '1px solid #e5e7eb' }}>
+                    <th style={{ padding: '8px 0' }}>Account</th>
+                    <th style={{ padding: '8px 0' }}>Segment</th>
+                    <th style={{ padding: '8px 0' }}>Cadence</th>
+                    <th style={{ padding: '8px 0', textAlign: 'right' }}>Visits</th>
+                    <th style={{ padding: '8px 0', textAlign: 'right' }}>Billed so far</th>
+                    <th style={{ padding: '8px 0', textAlign: 'right' }}>Run-rate</th>
+                    <th style={{ padding: '8px 0', textAlign: 'right' }}>To invoice</th>
+                    <th style={{ padding: '8px 0', textAlign: 'right' }}>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...projectedDetail]
+                    .sort((a, b) => Number(b.uninvoiced_fill) - Number(a.uninvoiced_fill) || Number(b.expected_mrr) - Number(a.expected_mrr))
+                    .map((r, i) => {
+                      const owed = Number(r.uninvoiced_fill) > 0.5;
+                      return (
+                        <tr key={i} style={{ borderBottom: '1px solid #f3f4f6', opacity: owed ? 1 : 0.55 }}>
+                          <td style={{ padding: '8px 0', fontWeight: 500 }}>{r.customer}</td>
+                          <td style={{ padding: '8px 0', color: '#6b7280' }}>{r.segment}</td>
+                          <td style={{ padding: '8px 0', color: '#6b7280' }}>{r.service_bucket}</td>
+                          <td style={{ padding: '8px 0', textAlign: 'right' }}>{r.visits}</td>
+                          <td style={{ padding: '8px 0', textAlign: 'right' }}>${fmt(Number(r.actual_billed))}</td>
+                          <td style={{ padding: '8px 0', textAlign: 'right' }}>${fmt(Number(r.expected_mrr))}</td>
+                          <td style={{ padding: '8px 0', textAlign: 'right', fontWeight: owed ? 700 : 400, color: owed ? '#b45309' : '#9ca3af' }}>${fmt(Number(r.uninvoiced_fill))}</td>
+                          <td style={{ padding: '8px 0', textAlign: 'right' }}>
+                            <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 999, background: owed ? '#fef3c7' : '#dcfce7', color: owed ? '#92400e' : '#166534', whiteSpace: 'nowrap' }}>
+                              {owed ? 'To invoice' : 'Already entered'}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+                <tfoot>
+                  <tr style={{ borderTop: '2px solid #e5e7eb', fontWeight: 700 }}>
+                    <td style={{ padding: '10px 0' }} colSpan={6}>Not yet invoiced</td>
+                    <td style={{ padding: '10px 0', textAlign: 'right', color: '#b45309' }}>${fmt(Number(projThisMonth.uninvoiced_fill))}</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
 
           <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: 24 }}>
             <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Total Monthly Revenue</h2>
