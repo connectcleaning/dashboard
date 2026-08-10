@@ -10,7 +10,7 @@ interface CohortRow { display_name: string | null; channel: string; ltv: number;
 // ── shared types ─────────────────────────────────────────────────────────────
 export interface MrrRow       { month: string; recurring_jobs: number; recurring_revenue: number }
 export interface MonthlyRow   { month: string; jobs: number; total_revenue: number }
-export interface SummaryRow   { total_revenue: number; avg_job_size: number; total_jobs: number }
+export interface PeriodRow    { recurring_revenue: number; onetime_revenue: number; total_revenue: number; avg_job_size: number; total_jobs: number }
 export interface OppsRow      { status: string; count: number }
 export interface SourceRow    { source: string; total: number; won: number; close_rate: number }
 export interface SpendRow     { month: string; total_spend: number }
@@ -30,7 +30,7 @@ export interface ProjectedRevRow  { month: string; actual_revenue: number; proje
 export interface ProjectedDetailRow { customer: string; segment: string; service_bucket: string; visits: number; actual_billed: number; expected_invoice: number; uninvoiced_fill: number }
 
 export interface DashboardData {
-  mrr: MrrRow[]; monthly: MonthlyRow[]; summary: SummaryRow[];
+  mrr: MrrRow[]; monthly: MonthlyRow[]; period: PeriodRow[]; periodPrev: PeriodRow[];
   opps: OppsRow[]; sources: SourceRow[];
   spend: SpendRow[]; adRoi: AdRoiRow[]; categories: CategoryRow[];
   channelSummary: ChannelRow[]; channelRoi: ChannelRoiRow[]; channelNewMrr: ChannelMrrRow[];
@@ -70,7 +70,7 @@ const TABS = ['Operations', 'Finance', 'Marketing & Sales'] as const;
 type Tab = typeof TABS[number];
 
 // ── main component ────────────────────────────────────────────────────────────
-export function DashboardTabs({ data }: { data: DashboardData }) {
+export function DashboardTabs({ data, periodLabel, projectedPeriodTotal }: { data: DashboardData; periodLabel: string; projectedPeriodTotal: number }) {
   const [tab, setTab] = useState<Tab>('Operations');
   const [segment, setSegment] = useState<'All' | 'House Cleaning' | 'Commercial'>('All');
   const [openCell, setOpenCell] = useState<string | null>(null);       // "YYYY-MM|Channel"
@@ -120,7 +120,7 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
   function getChurnEdit(row: ChurnQueueRow) {
     return churnEdits[row.hcp_customer_id] ?? { status: row.status, reason: row.reason ?? '', notes: '' };
   }
-  const { mrr, monthly, summary, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr, churnService, churnSub, monthlyChurn, churnWindowService, retention, ltvService, saveList, projectedRev, projectedDetail } = data;
+  const { mrr, monthly, period, periodPrev, opps, sources, spend, adRoi, categories, channelSummary, channelRoi, channelNewMrr, churnService, churnSub, monthlyChurn, churnWindowService, retention, ltvService, saveList, projectedRev, projectedDetail } = data;
   const newMrrLookup = Object.fromEntries(channelNewMrr.map(r => [`${r.month.slice(0, 7)}|${r.channel}`, r]));
 
   async function toggleCell(month: string, channel: string) {
@@ -141,22 +141,22 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
     }
   }
 
-  const s = summary[0];
-  const currentMonth = monthly[monthly.length - 1];
-  const prevMonth    = monthly[monthly.length - 2];
-  const revenueChange = currentMonth && prevMonth
-    ? ((currentMonth.total_revenue - prevMonth.total_revenue) / prevMonth.total_revenue * 100).toFixed(1)
-    : null;
-  // Projected revenue for the current month: actual billed jobs plus, for
-  // lump-billed recurring accounts still showing $0, their expected run-rate.
+  // Period-scoped KPIs (driven by the date-range preset). p = selected period,
+  // pv = the equivalent previous period, for "vs previous" deltas.
+  const p  = period[0];
+  const pv = periodPrev[0];
+  const pctChange = (cur: number, prev: number): string | null =>
+    prev > 0 ? (((cur - prev) / prev) * 100).toFixed(0) : null;
+  const recurringChange = p && pv ? pctChange(Number(p.recurring_revenue), Number(pv.recurring_revenue)) : null;
+  const onetimeChange   = p && pv ? pctChange(Number(p.onetime_revenue), Number(pv.onetime_revenue)) : null;
+  const jobsChange      = p && pv ? pctChange(Number(p.total_jobs), Number(pv.total_jobs)) : null;
+  // Projected revenue: the current in-progress month's actual billed jobs plus,
+  // for commercial accounts still showing $0, their typical historical invoice.
+  // Shown as the current-month drill-down; the headline is the period total.
   const thisMonthKey = new Date().toISOString().slice(0, 7);
   const projThisMonth = projectedRev.find(r => r.month.slice(0, 7) === thisMonthKey);
-  const currentMrr = mrr[mrr.length - 1];
-  const prevMrr    = mrr[mrr.length - 2];
-  const mrrChange  = currentMrr && prevMrr
-    ? ((currentMrr.recurring_revenue - prevMrr.recurring_revenue) / prevMrr.recurring_revenue * 100).toFixed(1)
-    : null;
   const mrrByMonth = Object.fromEntries(mrr.map(r => [r.month.slice(0, 7), Number(r.recurring_revenue)]));
+  const chartTotal = monthly.reduce((a, r) => a + Number(r.total_revenue), 0);
   const wonOpps   = opps.find(o => o.status === 'won')?.count ?? 0;
   const totalOpps = opps.reduce((a, o) => a + Number(o.count), 0);
   const closeRate = totalOpps ? ((Number(wonOpps) / totalOpps) * 100).toFixed(1) : '—';
@@ -268,28 +268,32 @@ export function DashboardTabs({ data }: { data: DashboardData }) {
       {/* ── OPERATIONS ── */}
       {tab === 'Operations' && (
         <>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>{periodLabel}</span>
+            <span style={{ fontSize: 12, color: '#9ca3af' }}>— metrics below reflect the selected period</span>
+          </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 16, marginBottom: projThisMonth && showProjDetail ? 16 : 40 }}>
             <div
-              onClick={() => projThisMonth && setShowProjDetail(v => !v)}
+              onClick={() => projThisMonth && Number(projThisMonth.uninvoiced_fill) > 0 && setShowProjDetail(v => !v)}
               style={{
                 background: '#fff', borderRadius: 12, padding: '20px 24px',
                 boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
-                cursor: projThisMonth ? 'pointer' : 'default',
+                cursor: projThisMonth && Number(projThisMonth.uninvoiced_fill) > 0 ? 'pointer' : 'default',
                 outline: showProjDetail ? '2px solid #111' : 'none',
               }}
             >
               <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Projected Revenue</p>
-              <p style={{ fontSize: 28, fontWeight: 700, margin: 0 }}>${projThisMonth ? fmt(projThisMonth.projected_revenue) : '—'}</p>
-              {projThisMonth && (
+              <p style={{ fontSize: 28, fontWeight: 700, margin: 0 }}>${fmt(projectedPeriodTotal)}</p>
+              {projThisMonth && Number(projThisMonth.uninvoiced_fill) > 0 && (
                 <p style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
-                  this month · <span style={{ color: '#2563eb', textDecoration: 'underline', textUnderlineOffset: 2 }}>${fmt(projThisMonth.uninvoiced_fill)} not yet invoiced {showProjDetail ? '▲' : '▼'}</span>
+                  incl. <span style={{ color: '#2563eb', textDecoration: 'underline', textUnderlineOffset: 2 }}>${fmt(projThisMonth.uninvoiced_fill)} not yet invoiced {showProjDetail ? '▲' : '▼'}</span>
                 </p>
               )}
             </div>
-            <Card label="This Month Revenue" value={`$${currentMonth ? fmt(currentMonth.total_revenue) : '—'}`} sub={revenueChange ? `${revenueChange}% vs last month` : ''} />
-            <Card label="MRR" value={`$${currentMrr ? fmt(currentMrr.recurring_revenue) : '—'}`} sub={mrrChange ? `${mrrChange}% vs last month` : ''} />
-            <Card label="Avg Job Size" value={`$${(s?.avg_job_size ?? 0).toFixed(0)}`} />
-            <Card label="Total Jobs" value={(s?.total_jobs ?? 0).toString()} />
+            <Card label="Recurring Revenue" value={`$${fmt(Number(p?.recurring_revenue ?? 0))}`} sub={recurringChange != null ? `${Number(recurringChange) >= 0 ? '+' : ''}${recurringChange}% vs prev` : 'recurring jobs'} />
+            <Card label="One-Time Revenue" value={`$${fmt(Number(p?.onetime_revenue ?? 0))}`} sub={onetimeChange != null ? `${Number(onetimeChange) >= 0 ? '+' : ''}${onetimeChange}% vs prev` : 'one-off jobs'} />
+            <Card label="Avg Job Size" value={`$${Number(p?.avg_job_size ?? 0).toFixed(0)}`} />
+            <Card label="Total Jobs" value={Number(p?.total_jobs ?? 0).toString()} sub={jobsChange != null ? `${Number(jobsChange) >= 0 ? '+' : ''}${jobsChange}% vs prev` : ''} />
           </div>
 
           {projThisMonth && showProjDetail && (
@@ -345,7 +349,7 @@ Commercial accounts are invoiced as a lump — the month&rsquo;s revenue is drop
 
           <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.08)', marginBottom: 24 }}>
             <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Total Monthly Revenue</h2>
-            <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 20 }}>Period total: <strong>${fmt(s?.total_revenue ?? 0)}</strong> · MRR shown as the inner segment of each bar</p>
+            <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 20 }}>Trailing 12 months · <strong>${fmt(chartTotal)}</strong> · MRR shown as the inner segment of each bar</p>
             <RevenueMrrChart data={monthly.map(r => ({
               month: fmtMonthShort(r.month),
               revenue: r.total_revenue,
